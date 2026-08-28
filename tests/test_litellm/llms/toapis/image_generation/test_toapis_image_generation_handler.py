@@ -66,7 +66,7 @@ class _AdvancingClock:
         self.now += delay
 
 
-def test_toapis_sync_polling_encodes_task_id_and_normalizes_result():
+def test_toapis_sync_polling_normalizes_pending_status_and_result():
     handler = ToAPISImageGeneration(sync_sleep=lambda _: None, monotonic=lambda: 0.0)
     client = _SyncSequenceClient(
         (
@@ -78,7 +78,7 @@ def test_toapis_sync_polling_encodes_task_id_and_normalizes_result():
         )
     )
     final_response = handler._poll_sync(
-        initial_response=_task_response("queued", task_id="task/with query?"),
+        initial_response=_task_response("pending", task_id="task/with query?"),
         complete_url="https://toapis.com/v1/images/generations",
         headers={"Authorization": "Bearer test-key"},
         client=client,

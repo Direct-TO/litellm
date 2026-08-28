@@ -1,8 +1,8 @@
 from collections.abc import Mapping, Sequence
-from typing import Final, Literal
+from typing import Annotated, Final, Literal
 
 import httpx
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, BeforeValidator, ConfigDict
 
 import litellm
 from litellm.llms.base_llm.base_utils import BaseLLMModelInfo
@@ -12,6 +12,16 @@ from litellm.types.llms.openai import AllMessageValues
 from litellm.types.utils import ProviderSpecificModelInfo
 
 DEFAULT_API_BASE: Final = "https://toapis.com/v1"
+
+
+def _normalize_task_status(status: object) -> object:
+    return "queued" if status == "pending" else status
+
+
+ToAPISTaskStatus = Annotated[
+    Literal["queued", "in_progress", "completed", "failed"],
+    BeforeValidator(_normalize_task_status),
+]
 
 
 class ToAPISTaskError(BaseModel):
@@ -42,7 +52,7 @@ class ToAPISTaskResponse(BaseModel):
     id: str
     object: Literal["generation.task"]
     model: str | None = None
-    status: Literal["queued", "in_progress", "completed", "failed"]
+    status: ToAPISTaskStatus
     progress: int = 0
     created_at: int | None = None
     completed_at: int | None = None

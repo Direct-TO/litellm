@@ -1,8 +1,26 @@
+import httpx
+import pytest
+
 import litellm
 from litellm.litellm_core_utils.get_llm_provider_logic import get_llm_provider
+from litellm.llms.base_llm.chat.transformation import BaseLLMException
 from litellm.llms.openai_like.json_loader import JSONProviderRegistry
-from litellm.llms.toapis.common_utils import ToAPISModelInfo
+from litellm.llms.toapis.common_utils import ToAPISModelInfo, parse_toapis_task
 from litellm.utils import ProviderConfigManager
+
+
+def _task_response(status: str) -> httpx.Response:
+    return httpx.Response(
+        200,
+        json={
+            "id": "task_123",
+            "object": "generation.task",
+            "model": "gpt-image-2",
+            "status": status,
+            "progress": 0,
+            "created_at": 1703884800,
+        },
+    )
 
 
 def test_toapis_provider_registration_and_resolution():
@@ -14,6 +32,17 @@ def test_toapis_provider_registration_and_resolution():
     assert litellm.LlmProviders.TOAPIS.value == "toapis"
     assert "toapis" in litellm.provider_list
     assert "toapis" not in litellm.openai_compatible_providers
+
+
+def test_toapis_pending_task_status_normalizes_to_queued():
+    task = parse_toapis_task(_task_response("pending"))
+
+    assert task.status == "queued"
+
+
+def test_toapis_unknown_task_status_is_rejected():
+    with pytest.raises(BaseLLMException, match="Invalid ToAPIs task response"):
+        parse_toapis_task(_task_response("mystery"))
 
 
 def test_toapis_json_config_supports_responses():

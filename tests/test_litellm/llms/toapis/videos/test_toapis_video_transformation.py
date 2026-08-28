@@ -113,13 +113,13 @@ def test_toapis_video_status_url_encodes_task_id():
     assert data == {}
 
 
-def test_toapis_public_video_generation_uses_provider_protocol(respx_mock):
+def test_toapis_public_video_generation_normalizes_pending_status(respx_mock):
     route = respx_mock.post("https://toapis.com/v1/videos/generations").respond(
         json={
             "id": "video_task_123",
             "object": "generation.task",
             "model": "sora-2-vvip",
-            "status": "queued",
+            "status": "pending",
             "progress": 0,
             "created_at": 1703884800,
         }
