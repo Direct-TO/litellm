@@ -21,13 +21,26 @@ def test_toapis_image_request_and_base_url(monkeypatch):
         "Authorization": "Bearer test-key",
         "Content-Type": "application/json",
     }
+    mapped = config.map_openai_params(
+        non_default_params={"size": "16:9"},
+        optional_params={},
+        model="gpt-image-2",
+        drop_params=False,
+    )
+    assert mapped == {"size": "16:9", "resolution": "1k", "response_format": "url"}
     assert config.transform_image_generation_request(
         model="gpt-image-2",
         prompt="city",
-        optional_params={"size": "16:9", "n": 1},
+        optional_params=mapped,
         litellm_params={},
         headers={},
-    ) == {"model": "gpt-image-2", "prompt": "city", "size": "16:9", "n": 1}
+    ) == {
+        "model": "gpt-image-2",
+        "prompt": "city",
+        "size": "16:9",
+        "resolution": "1k",
+        "response_format": "url",
+    }
 
 
 def test_toapis_api_base_rejects_query_and_fragment():
@@ -57,7 +70,6 @@ def test_toapis_public_image_generation_forwards_provider_fields(respx_mock):
         prompt="city",
         api_key="test-key",
         size="16:9",
-        extra_body={"resolution": "2k", "reference_images": ["https://files.example/reference.png"]},
     )
 
     assert response.data[0].url == "https://files.example/image.png"
@@ -66,9 +78,27 @@ def test_toapis_public_image_generation_forwards_provider_fields(respx_mock):
         "model": "gpt-image-2",
         "prompt": "city",
         "size": "16:9",
-        "resolution": "2k",
-        "reference_images": ["https://files.example/reference.png"],
+        "resolution": "1k",
+        "response_format": "url",
     }
+
+
+@pytest.mark.parametrize(
+    "model,size,response_format",
+    [
+        ("other-model", "1024x1024", "url"),
+        ("gpt-image-2", "999x999", "url"),
+        ("gpt-image-2", "1024x1024", "b64_json"),
+    ],
+)
+def test_toapis_image_service_rejects_unsupported_contract(model, size, response_format):
+    with pytest.raises(litellm.UnsupportedParamsError):
+        ToAPISImageGenerationConfig().map_openai_params(
+            non_default_params={"size": size, "response_format": response_format},
+            optional_params={},
+            model=model,
+            drop_params=False,
+        )
 
 
 @pytest.mark.asyncio

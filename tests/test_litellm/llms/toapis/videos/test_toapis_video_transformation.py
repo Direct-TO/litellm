@@ -15,13 +15,13 @@ def test_toapis_video_request_maps_openai_params_and_uses_json(monkeypatch):
     config = ToAPISVideoConfig()
     mapped = config.map_openai_params(
         video_create_optional_params={"seconds": "12", "size": "1920x1080"},
-        model="sora-2-vvip",
+        model="seedance-2-5",
         drop_params=False,
     )
     data, files, url = config.transform_video_create_request(
-        model="sora-2-vvip",
+        model="seedance-2-5",
         prompt="waves",
-        api_base=config.get_complete_url("sora-2-vvip", None, {}),
+        api_base=config.get_complete_url("seedance-2-5", None, {}),
         video_create_optional_request_params=mapped,
         litellm_params=GenericLiteLLMParams(),
         headers={},
@@ -29,7 +29,7 @@ def test_toapis_video_request_maps_openai_params_and_uses_json(monkeypatch):
 
     assert mapped == {"duration": 12, "aspect_ratio": "16:9"}
     assert data == {
-        "model": "sora-2-vvip",
+        "model": "seedance-2-5",
         "prompt": "waves",
         "duration": 12,
         "aspect_ratio": "16:9",
@@ -37,7 +37,7 @@ def test_toapis_video_request_maps_openai_params_and_uses_json(monkeypatch):
     assert not files
     assert url == "https://toapis.com/v1/videos/generations"
     assert config.use_multipart_form_data() is False
-    assert config.validate_environment({}, "sora-2-vvip") == {
+    assert config.validate_environment({}, "seedance-2-5") == {
         "Authorization": "Bearer test-key",
         "Content-Type": "application/json",
     }
@@ -47,6 +47,15 @@ def test_toapis_video_rejects_local_reference_input():
     with pytest.raises(ValueError, match="extra_body.image_urls"):
         ToAPISVideoConfig().map_openai_params(
             video_create_optional_params={"input_reference": b"image"},
+            model="seedance-2-5",
+            drop_params=False,
+        )
+
+
+def test_toapis_video_service_rejects_other_models():
+    with pytest.raises(litellm.UnsupportedParamsError):
+        ToAPISVideoConfig().map_openai_params(
+            video_create_optional_params={},
             model="sora-2-vvip",
             drop_params=False,
         )
@@ -72,7 +81,7 @@ def test_toapis_video_task_response_exposes_output_url_and_provider_id():
         json={
             "id": "video_task_123",
             "object": "generation.task",
-            "model": "sora-2-vvip",
+            "model": "seedance-2-5",
             "status": "completed",
             "progress": 100,
             "created_at": 1703884800,
@@ -86,7 +95,7 @@ def test_toapis_video_task_response_exposes_output_url_and_provider_id():
     )
 
     result = config.transform_video_create_response(
-        model="sora-2-vvip",
+        model="seedance-2-5",
         raw_response=response,
         logging_obj=Mock(),
         custom_llm_provider="toapis",
@@ -97,7 +106,7 @@ def test_toapis_video_task_response_exposes_output_url_and_provider_id():
     assert result.output_url == "https://files.example/video.mp4"
     assert result.expires_at == 1703971300
     assert decoded["custom_llm_provider"] == "toapis"
-    assert decoded["model_id"] == "sora-2-vvip"
+    assert decoded["model_id"] == "seedance-2-5"
     assert decoded["video_id"] == "video_task_123"
 
 
@@ -118,7 +127,7 @@ def test_toapis_public_video_generation_normalizes_pending_status(respx_mock):
         json={
             "id": "video_task_123",
             "object": "generation.task",
-            "model": "sora-2-vvip",
+            "model": "seedance-2-5",
             "status": "pending",
             "progress": 0,
             "created_at": 1703884800,
@@ -126,20 +135,26 @@ def test_toapis_public_video_generation_normalizes_pending_status(respx_mock):
     )
 
     response = litellm.video_generation(
-        model="toapis/sora-2-vvip",
+        model="toapis/seedance-2-5",
         prompt="waves",
         api_key="test-key",
         seconds="12",
         size="1920x1080",
-        extra_body={"image_urls": ["https://files.example/reference.png"]},
+        extra_body={
+            "resolution": "720p",
+            "generate_audio": True,
+            "image_with_roles": [{"url": "https://files.example/reference.png", "role": "reference_image"}],
+        },
     )
 
     assert response.status == "queued"
     assert route.calls[0].request.headers["Authorization"] == "Bearer test-key"
     assert json.loads(route.calls[0].request.content) == {
-        "model": "sora-2-vvip",
+        "model": "seedance-2-5",
         "prompt": "waves",
         "duration": 12,
         "aspect_ratio": "16:9",
-        "image_urls": ["https://files.example/reference.png"],
+        "resolution": "720p",
+        "generate_audio": True,
+        "image_with_roles": [{"url": "https://files.example/reference.png", "role": "reference_image"}],
     }

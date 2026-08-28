@@ -1,13 +1,15 @@
 from collections.abc import Mapping, Sequence
+from types import MappingProxyType
 from typing import Final
 
 import httpx
 
+from litellm.exceptions import UnsupportedParamsError
 from litellm.litellm_core_utils.litellm_logging import Logging as LiteLLMLoggingObj
 from litellm.llms.base_llm.chat.transformation import BaseLLMException
 from litellm.llms.base_llm.image_generation.transformation import BaseImageGenerationConfig
 from litellm.types.llms.openai import AllMessageValues, OpenAIImageGenerationOptionalParams
-from litellm.types.utils import ImageResponse
+from litellm.types.utils import ImageObject, ImageResponse
 
 from ..common_utils import build_zexapi_endpoint, get_zexapi_api_key, raise_for_zexapi_error
 
@@ -15,6 +17,21 @@ _SUPPORTED_PARAMS: Final[tuple[OpenAIImageGenerationOptionalParams, ...]] = (
     "response_format",
     "size",
 )
+_IMAGE2_RATIO_TO_SIZE: Final[Mapping[str, str]] = MappingProxyType(
+    {
+        "1:1": "1024x1024",
+        "16:9": "1280x720",
+        "9:16": "720x1280",
+        "3:2": "1248x832",
+        "2:3": "832x1248",
+        "4:3": "1152x864",
+        "3:4": "864x1152",
+        "5:4": "1120x896",
+        "4:5": "896x1120",
+        "21:9": "1456x624",
+    }
+)
+_IMAGE2_SIZES: Final[frozenset[str]] = frozenset(_IMAGE2_RATIO_TO_SIZE.values())
 
 
 class ZexAPIImageGenerationConfig(BaseImageGenerationConfig):
@@ -30,9 +47,38 @@ class ZexAPIImageGenerationConfig(BaseImageGenerationConfig):
         model: str,
         drop_params: bool,
     ) -> dict[str, object]:  # mutable-ok: image parameter mapping contract requires a concrete dict
+        if model != "image2":
+            raise UnsupportedParamsError(
+                message=f"image-generation does not support ZexAPI model={model!r}",
+                model=model,
+                llm_provider="zexapi",
+            )
+        params: Final = MappingProxyType(
+            {  # mutable-ok: merged parameter map is immediately frozen
+                **optional_params,
+                **non_default_params,
+            }
+        )
+        response_format: Final = params.get("response_format")
+        if response_format not in (None, "url"):
+            raise UnsupportedParamsError(
+                message="image-generation only supports response_format='url'",
+                model=model,
+                llm_provider="zexapi",
+            )
+        size: Final = params.get("size", "1:1")
+        mapped_size: Final[str | None] = _IMAGE2_RATIO_TO_SIZE.get(size) if isinstance(size, str) else None
+        native_size: Final[str | None] = size if isinstance(size, str) and size in _IMAGE2_SIZES else None
+        provider_size: Final[str | None] = mapped_size if mapped_size is not None else native_size
+        if provider_size is None:
+            raise UnsupportedParamsError(
+                message=f"image-generation does not support size={size!r}",
+                model=model,
+                llm_provider="zexapi",
+            )
         return {  # mutable-ok: image parameter mapping contract requires a concrete dict
-            **optional_params,
-            **non_default_params,
+            "size": provider_size,
+            "response_format": "url",
         }
 
     def get_complete_url(
@@ -96,10 +142,23 @@ class ZexAPIImageGenerationConfig(BaseImageGenerationConfig):
     ) -> ImageResponse:
         raise_for_zexapi_error(raw_response)
         try:
-            return ImageResponse.model_validate_json(raw_response.text)
+            provider_response: Final = ImageResponse.model_validate_json(raw_response.text)
         except ValueError as exc:
             raise BaseLLMException(
                 status_code=raw_response.status_code,
                 message=f"Invalid ZexAPI image response: {exc}",
                 headers=raw_response.headers,
             ) from exc
+        images: Final = tuple(provider_response.data or ())
+        urls: Final = tuple(image.url for image in images if image.url is not None)
+        if len(urls) != len(images):
+            raise BaseLLMException(
+                status_code=502,
+                message="ZexAPI image response did not include a URL for every image",
+                headers=raw_response.headers,
+            )
+        return ImageResponse(
+            created=provider_response.created,
+            data=[ImageObject(url=url) for url in urls],  # mutable-ok: ImageResponse requires a list
+            usage=provider_response.usage,
+        )

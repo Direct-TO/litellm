@@ -203,9 +203,62 @@ model_list:
       model: deepseek/deepseek-chat
       api_key: os.environ/DEEPSEEK_API_KEY
 
+  # ---------- Media services ----------
+  # Add a supplier by repeating the service model_name with its own deployment policy.
+  - model_name: image-generation
+    litellm_params:
+      model: zexapi/image2
+      api_key: os.environ/ZEXAPI_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      allowed_fails_policy:
+        AuthenticationErrorAllowedFails: 0
+        TimeoutErrorAllowedFails: 2
+        RateLimitErrorAllowedFails: 2
+        InternalServerErrorAllowedFails: 2
+        ServiceUnavailableErrorAllowedFails: 2
+        BadGatewayErrorAllowedFails: 2
+        NotFoundErrorAllowedFails: 1
+  - model_name: image-generation
+    litellm_params:
+      model: toapis/gpt-image-2
+      api_key: os.environ/TOAPIS_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      allowed_fails_policy:
+        AuthenticationErrorAllowedFails: 0
+        TimeoutErrorAllowedFails: 2
+        RateLimitErrorAllowedFails: 2
+        InternalServerErrorAllowedFails: 2
+        ServiceUnavailableErrorAllowedFails: 2
+        BadGatewayErrorAllowedFails: 2
+        NotFoundErrorAllowedFails: 1
+  - model_name: video-generation
+    litellm_params:
+      model: toapis/seedance-2-5
+      api_key: os.environ/TOAPIS_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      allowed_fails_policy:
+        AuthenticationErrorAllowedFails: 0
+        TimeoutErrorAllowedFails: 2
+        RateLimitErrorAllowedFails: 2
+        InternalServerErrorAllowedFails: 2
+        ServiceUnavailableErrorAllowedFails: 2
+        BadGatewayErrorAllowedFails: 2
+        NotFoundErrorAllowedFails: 1
+
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
   completion_model: deepseek-chat
+  image_generation_model: image-generation
+  video_generation_model: video-generation
   # Opt-in: let CheckBatchCost track cost for unmanaged batches created with a raw
   # gs:// (Vertex) or s3:// (Bedrock) input_file_id. Requires a matching deployment
   # configured for the batched model. Defaults to false.

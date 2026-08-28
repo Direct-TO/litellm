@@ -268,7 +268,7 @@ describe("provider_info_helpers", () => {
 
     it("should return ToAPIs and ZexAPI placeholders", () => {
       expect(getPlaceholder(Providers.TOAPIS)).toBe("toapis/gpt-5.6-terra");
-      expect(getPlaceholder(Providers.ZEXAPI)).toBe("zexapi/gpt-image2");
+      expect(getPlaceholder(Providers.ZEXAPI)).toBe("zexapi/image2");
     });
 
     it("should return the riva asr placeholder for NVIDIA_RIVA provider", () => {

@@ -230,6 +230,21 @@ async def test_generation__route_type_data_and_no_provider_default(harness):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("requested_model", [None, "provider-model-must-not-leak"])
+async def test_generation__uses_configured_video_service_model(harness, requested_model):
+    body = {"prompt": "a sunset"}
+    if requested_model is not None:
+        body["model"] = requested_model
+
+    with patch.object(proxy_server, "general_settings", {"video_generation_model": "video-generation"}):
+        resp = await call_generation(harness, body=body)
+
+    assert resp is SENTINEL
+    assert harness.route_type() == "avideo_generation"
+    assert harness.processor_data() == {"model": "video-generation", "prompt": "a sunset"}
+
+
+@pytest.mark.asyncio
 async def test_generation__input_reference_attached(harness):
     body = {"model": "sora-2", "prompt": "a sunset"}
     upload = MagicMock(name="upload_file")

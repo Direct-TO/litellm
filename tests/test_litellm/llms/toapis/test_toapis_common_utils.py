@@ -102,7 +102,7 @@ def test_toapis_media_models_are_registered():
     model_cost = litellm.get_model_cost_map(url="")
 
     assert model_cost["toapis/gpt-image-2"]["mode"] == "image_generation"
-    assert model_cost["toapis/sora-2-vvip"]["mode"] == "video_generation"
+    assert model_cost["toapis/seedance-2-5"]["mode"] == "video_generation"
 
 
 def test_toapis_chat_completion_uses_provider_url_and_key(respx_mock, monkeypatch):

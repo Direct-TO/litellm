@@ -1,8 +1,10 @@
 from collections.abc import Mapping, Sequence
+from types import MappingProxyType
 from typing import Final
 
 import httpx
 
+from litellm.exceptions import UnsupportedParamsError
 from litellm.litellm_core_utils.litellm_logging import Logging as LiteLLMLoggingObj
 from litellm.litellm_core_utils.url_utils import encode_url_path_segment
 from litellm.llms.base_llm.chat.transformation import BaseLLMException
@@ -13,12 +15,39 @@ from litellm.types.utils import ImageObject, ImageResponse
 from ..common_utils import build_toapis_endpoint, get_toapis_api_key, parse_toapis_task
 
 _SUPPORTED_PARAMS: Final[tuple[OpenAIImageGenerationOptionalParams, ...]] = (
-    "n",
-    "output_compression",
-    "output_format",
-    "quality",
     "response_format",
     "size",
+)
+_ZEXAPI_IMAGE2_SIZE_TO_RATIO: Final[Mapping[str, str]] = MappingProxyType(
+    {
+        "1024x1024": "1:1",
+        "1280x720": "16:9",
+        "720x1280": "9:16",
+        "1248x832": "3:2",
+        "832x1248": "2:3",
+        "1152x864": "4:3",
+        "864x1152": "3:4",
+        "1120x896": "5:4",
+        "896x1120": "4:5",
+        "1456x624": "21:9",
+    }
+)
+_TOAPIS_IMAGE2_RATIOS: Final[frozenset[str]] = frozenset(
+    (
+        "1:1",
+        "3:2",
+        "2:3",
+        "4:3",
+        "3:4",
+        "5:4",
+        "4:5",
+        "16:9",
+        "9:16",
+        "2:1",
+        "1:2",
+        "21:9",
+        "9:21",
+    )
 )
 
 
@@ -35,9 +64,38 @@ class ToAPISImageGenerationConfig(BaseImageGenerationConfig):
         model: str,
         drop_params: bool,
     ) -> dict[str, object]:  # mutable-ok: image parameter mapping contract requires a concrete dict
+        if model != "gpt-image-2":
+            raise UnsupportedParamsError(
+                message=f"image-generation does not support ToAPIs model={model!r}",
+                model=model,
+                llm_provider="toapis",
+            )
+        params: Final = MappingProxyType(
+            {  # mutable-ok: merged parameter map is immediately frozen
+                **optional_params,
+                **non_default_params,
+            }
+        )
+        response_format: Final = params.get("response_format")
+        if response_format not in (None, "url"):
+            raise UnsupportedParamsError(
+                message="image-generation only supports response_format='url'",
+                model=model,
+                llm_provider="toapis",
+            )
+        size: Final = params.get("size", "1:1")
+        ratio_alias: Final[str | None] = _ZEXAPI_IMAGE2_SIZE_TO_RATIO.get(size) if isinstance(size, str) else None
+        ratio: Final[str | None] = size if isinstance(size, str) and size in _TOAPIS_IMAGE2_RATIOS else ratio_alias
+        if ratio is None:
+            raise UnsupportedParamsError(
+                message=f"image-generation does not support size={size!r}",
+                model=model,
+                llm_provider="toapis",
+            )
         return {  # mutable-ok: image parameter mapping contract requires a concrete dict
-            **optional_params,
-            **non_default_params,
+            "size": ratio,
+            "resolution": "1k",
+            "response_format": "url",
         }
 
     def get_complete_url(

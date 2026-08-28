@@ -81,6 +81,9 @@ async def video_generation(
 
     # Read request body
     data: Final = await _read_request_body(request=request)
+    data["model"] = general_settings.get("video_generation_model", None) or user_model or data.get("model", None)
+    if user_model:
+        data["model"] = user_model
     if input_reference is not None:
         input_reference_file: Final = await batch_to_bytesio([input_reference])
         if input_reference_file:

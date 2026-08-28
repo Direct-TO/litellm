@@ -10,7 +10,7 @@ def test_zexapi_image_edit_uses_provider_url_and_preserves_dual_response(monkeyp
     monkeypatch.setenv("ZEXAPI_API_KEY", "test-key")
     config = ZexAPIImageEditConfig()
     result = config.transform_image_edit_response(
-        model="gpt-image2",
+        model="image2",
         raw_response=httpx.Response(
             200,
             json={
@@ -21,8 +21,8 @@ def test_zexapi_image_edit_uses_provider_url_and_preserves_dual_response(monkeyp
         logging_obj=Mock(),
     )
 
-    assert config.get_complete_url("gpt-image2", None, {}) == "https://zexapi.com/v1/images/edits"
-    assert config.validate_environment({}, "gpt-image2", litellm_params={}) == {"Authorization": "Bearer test-key"}
+    assert config.get_complete_url("image2", None, {}) == "https://zexapi.com/v1/images/edits"
+    assert config.validate_environment({}, "image2", litellm_params={}) == {"Authorization": "Bearer test-key"}
     assert result.data[0].url == "https://files.example/edit.png"
     assert result.data[0].b64_json == "ZWRpdA=="
 
@@ -36,7 +36,7 @@ def test_zexapi_public_image_edit_uses_multipart_endpoint(respx_mock):
     )
 
     response = litellm.image_edit(
-        model="zexapi/gpt-image2",
+        model="zexapi/image2",
         prompt="make it gray",
         image=b"\x89PNG\r\n\x1a\n",
         api_key="test-key",

@@ -6,6 +6,7 @@ from typing import Final
 import httpx
 from httpx._types import RequestFiles
 
+from litellm.exceptions import UnsupportedParamsError
 from litellm.litellm_core_utils.litellm_logging import Logging as LiteLLMLoggingObj
 from litellm.llms.openai.videos.transformation import OpenAIVideoConfig
 from litellm.types.router import GenericLiteLLMParams
@@ -31,6 +32,12 @@ class ToAPISVideoConfig(OpenAIVideoConfig):
         model: str,
         drop_params: bool,
     ) -> dict[str, object]:  # mutable-ok: video request utility updates and removes extra_body
+        if model != "seedance-2-5":
+            raise UnsupportedParamsError(
+                message=f"video-generation does not support ToAPIs model={model!r}",
+                model=model,
+                llm_provider="toapis",
+            )
         input_reference: Final = video_create_optional_params.get("input_reference")
         if input_reference is not None and not drop_params:
             raise ValueError("ToAPIs video generation accepts reference image URLs through extra_body.image_urls")

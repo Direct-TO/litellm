@@ -437,7 +437,7 @@ const providerPlaceholderMap: Partial<Record<Providers, string>> = {
   [Providers.Voyage]: "voyage/",
   [Providers.WATSONX]: "watsonx/ibm/granite-3-3-8b-instruct",
   [Providers.ZAI]: "zai/glm-4.5",
-  [Providers.ZEXAPI]: "zexapi/gpt-image2",
+  [Providers.ZEXAPI]: "zexapi/image2",
 };
 
 export const getPlaceholder = (selectedProvider: string): string => {

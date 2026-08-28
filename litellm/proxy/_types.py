@@ -2373,6 +2373,12 @@ class ConfigGeneralSettings(LiteLLMPydanticObjectBase):
     """
 
     completion_model: str | None = Field(None, description="proxy level default model for all chat completion calls")
+    image_generation_model: str | None = Field(
+        None, description="proxy level default model group for image generation calls"
+    )
+    video_generation_model: str | None = Field(
+        None, description="proxy level default model group for video generation calls"
+    )
     plugins: list[PluginConfig] | None = Field(
         None, description="external services registered as embeddable UI plugins"
     )
