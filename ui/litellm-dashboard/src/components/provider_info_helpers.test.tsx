@@ -105,6 +105,11 @@ describe("provider_info_helpers", () => {
       expect(result.displayName).toBe(Providers.ZAI);
     });
 
+    it("should resolve ToAPIs and ZexAPI provider values", () => {
+      expect(getProviderLogoAndName("toapis").displayName).toBe(Providers.TOAPIS);
+      expect(getProviderLogoAndName("zexapi").displayName).toBe(Providers.ZEXAPI);
+    });
+
     it("should give hosted_vllm and vllm distinct display names", () => {
       const hosted = getProviderLogoAndName("hosted_vllm");
       const local = getProviderLogoAndName("vllm");
@@ -166,8 +171,10 @@ describe("provider_info_helpers", () => {
         Providers.PETALS,
         Providers.PG_VECTOR,
         Providers.PREDIBASE,
+        Providers.TOAPIS,
         Providers.WANDB,
         Providers.ZAI,
+        Providers.ZEXAPI,
       ];
       const logolessProviders = Object.values(Providers).filter((provider) => !providerLogoMap[provider]);
       expect([...logolessProviders].sort()).toEqual([...knownLogolessProviders].sort());
@@ -257,6 +264,11 @@ describe("provider_info_helpers", () => {
 
     it("should return zai/glm-4.5 placeholder for Z.AI provider", () => {
       expect(getPlaceholder(Providers.ZAI)).toBe("zai/glm-4.5");
+    });
+
+    it("should return ToAPIs and ZexAPI placeholders", () => {
+      expect(getPlaceholder(Providers.TOAPIS)).toBe("toapis/gpt-5.6-terra");
+      expect(getPlaceholder(Providers.ZEXAPI)).toBe("zexapi/gpt-image2");
     });
 
     it("should return the riva asr placeholder for NVIDIA_RIVA provider", () => {

@@ -39110,6 +39110,102 @@
         "supports_tool_choice": true,
         "supports_vision": true
     },
+    "toapis/gpt-image-2": {
+        "litellm_provider": "toapis",
+        "mode": "image_generation",
+        "source": "https://docs.toapis.com/docs/cn/api-reference/images/gpt-image-2/generation",
+        "supported_endpoints": [
+            "/v1/images/generations"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "image"
+        ]
+    },
+    "toapis/sora-2-vvip": {
+        "litellm_provider": "toapis",
+        "mode": "video_generation",
+        "source": "https://docs.toapis.com/docs/cn/api-reference/videos/sora2/generation",
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "zexapi/gpt-image2": {
+        "litellm_provider": "zexapi",
+        "mode": "image_generation",
+        "source": "https://6l0ket291i.apifox.cn/447357296e0",
+        "supported_endpoints": [
+            "/v1/images/generations",
+            "/v1/images/edits"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "image"
+        ]
+    },
+    "zexapi/image2": {
+        "litellm_provider": "zexapi",
+        "mode": "image_generation",
+        "source": "https://6l0ket291i.apifox.cn/447357296e0",
+        "supported_endpoints": [
+            "/v1/images/generations",
+            "/v1/images/edits"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "image"
+        ]
+    },
+    "zexapi/omni_flash-10s": {
+        "litellm_provider": "zexapi",
+        "mode": "video_generation",
+        "source": "https://6l0ket291i.apifox.cn/462450037e0",
+        "supported_modalities": [
+            "text",
+            "image",
+            "video"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "zexapi/sora-2-12s": {
+        "litellm_provider": "zexapi",
+        "mode": "video_generation",
+        "source": "https://6l0ket291i.apifox.cn/454078398e0",
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "zexapi/veo_3_1-fast": {
+        "litellm_provider": "zexapi",
+        "mode": "video_generation",
+        "source": "https://6l0ket291i.apifox.cn/424653897e0",
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
     "tts-1": {
         "input_cost_per_character": 1.5e-05,
         "litellm_provider": "openai",

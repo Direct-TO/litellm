@@ -200,5 +200,17 @@
       "temperature_max": 1.99
     },
     "supported_endpoints": ["/v1/chat/completions"]
+  },
+  "toapis": {
+    "base_url": "https://toapis.com/v1",
+    "api_key_env": "TOAPIS_API_KEY",
+    "api_base_env": "TOAPIS_API_BASE",
+    "supported_endpoints": ["/v1/chat/completions", "/v1/responses"]
+  },
+  "zexapi": {
+    "base_url": "https://zexapi.com/v1",
+    "api_key_env": "ZEXAPI_API_KEY",
+    "api_base_env": "ZEXAPI_API_BASE",
+    "supported_endpoints": ["/v1/chat/completions"]
   }
 }

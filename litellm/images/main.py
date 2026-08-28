@@ -34,6 +34,7 @@ from openai.types.audio.transcription_create_params import FileTypes
 # BFL handlers
 from litellm.llms.black_forest_labs.image_edit.handler import bfl_image_edit
 from litellm.llms.black_forest_labs.image_generation.handler import bfl_image_generation
+from litellm.llms.toapis.image_generation.handler import toapis_image_generation
 from litellm.main import (
     azure_chat_completions,
     base_llm_aiohttp_handler,
@@ -376,6 +377,23 @@ def image_generation(
         #########################################################
         # Providers using llm_http_handler
         #########################################################
+        elif custom_llm_provider == litellm.LlmProviders.TOAPIS:
+            if model is None:
+                raise ValueError("Model needs to be set for toapis")
+            litellm_params_dict["api_base"] = api_base or litellm.api_base
+            return toapis_image_generation.image_generation(
+                model=model,
+                prompt=prompt,
+                optional_params=optional_params,
+                litellm_params=litellm_params_dict,
+                logging_obj=litellm_logging_obj,
+                timeout=timeout,
+                api_key=api_key or dynamic_api_key,
+                extra_headers=extra_headers,
+                extra_body=kwargs.get("extra_body"),
+                client=client,
+                aimg_generation=aimg_generation,
+            )
         elif custom_llm_provider in (
             litellm.LlmProviders.RECRAFT,
             litellm.LlmProviders.AIML,
@@ -386,6 +404,7 @@ def image_generation(
             litellm.LlmProviders.VERTEX_AI,
             litellm.LlmProviders.OPENROUTER,
             litellm.LlmProviders.DASHSCOPE,
+            litellm.LlmProviders.ZEXAPI,
         ):
             if image_generation_config is None:
                 raise ValueError(f"image generation config is not supported for {custom_llm_provider}")
@@ -395,7 +414,6 @@ def image_generation(
             litellm_params_dict["api_base"] = _api_base
 
             return llm_http_handler.image_generation_handler(
-                api_key=api_key,
                 model=model,
                 prompt=prompt,
                 image_generation_provider_config=image_generation_config,
@@ -404,7 +422,11 @@ def image_generation(
                 litellm_params=litellm_params_dict,
                 logging_obj=litellm_logging_obj,
                 timeout=timeout,
+                extra_headers=extra_headers,
+                extra_body=kwargs.get("extra_body"),
                 client=client,
+                _is_async=aimg_generation,
+                api_key=api_key or dynamic_api_key,
             )
         elif custom_llm_provider == "black_forest_labs":
             # Route to BFL-specific handler (polling required)

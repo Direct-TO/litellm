@@ -159,6 +159,7 @@ export enum Providers {
   Soniox = "Soniox",
   TEXT_COMPLETION_CODESTRAL = "Text-Completion-Codestral",
   TogetherAI = "TogetherAI",
+  TOAPIS = "ToAPIs",
   TOPAZ = "Topaz",
   Triton = "Triton",
   V0 = "V0",
@@ -174,6 +175,7 @@ export enum Providers {
   xAI = "xAI",
   XINFERENCE = "Xinference",
   ZAI = "Z.AI (Zhipu AI)",
+  ZEXAPI = "ZexAPI",
 }
 
 export const provider_map: Record<string, string> = {
@@ -271,6 +273,7 @@ export const provider_map: Record<string, string> = {
   Soniox: "soniox",
   TEXT_COMPLETION_CODESTRAL: "text-completion-codestral",
   TogetherAI: "together_ai",
+  TOAPIS: "toapis",
   TOPAZ: "topaz",
   Triton: "triton",
   V0: "v0",
@@ -286,6 +289,7 @@ export const provider_map: Record<string, string> = {
   xAI: "xai",
   XINFERENCE: "xinference",
   ZAI: "zai",
+  ZEXAPI: "zexapi",
 };
 
 const standaloneSubproviderSlugs = new Set<string>(["bedrock_mantle"]);
@@ -427,11 +431,13 @@ const providerPlaceholderMap: Partial<Record<Providers, string>> = {
   [Providers.SageMaker]: "sagemaker/jumpstart-dft-meta-textgeneration-llama-2-7b",
   [Providers.SCX_AI]: "scx-ai/GLM-5.2",
   [Providers.Snowflake]: "snowflake/mistral-7b",
+  [Providers.TOAPIS]: "toapis/gpt-5.6-terra",
   [Providers.Vertex_AI]: "gemini-pro",
   [Providers.VolcEngine]: "volcengine/<any-model-on-volcengine>",
   [Providers.Voyage]: "voyage/",
   [Providers.WATSONX]: "watsonx/ibm/granite-3-3-8b-instruct",
   [Providers.ZAI]: "zai/glm-4.5",
+  [Providers.ZEXAPI]: "zexapi/gpt-image2",
 };
 
 export const getPlaceholder = (selectedProvider: string): string => {

@@ -20,6 +20,7 @@ class VideoObject(BaseModel):
     seconds: str | None = None
     size: str | None = None
     model: str | None = None
+    output_url: str | None = None
     usage: dict[str, Any] | None = None
     _hidden_params: dict[str, Any] = {}
 

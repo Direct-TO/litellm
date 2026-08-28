@@ -8730,6 +8730,10 @@ class ProviderConfigManager:
             from litellm.llms.azure_ai.common_utils import AzureFoundryModelInfo
 
             return AzureFoundryModelInfo(model=model)
+        elif LlmProviders.TOAPIS == provider:
+            from litellm.llms.toapis.common_utils import ToAPISModelInfo
+
+            return ToAPISModelInfo()
         return None
 
     @staticmethod
@@ -9034,6 +9038,14 @@ class ProviderConfigManager:
             )
 
             return get_modelscope_image_generation_config(model)
+        elif LlmProviders.TOAPIS == provider:
+            from litellm.llms.toapis.image_generation.transformation import ToAPISImageGenerationConfig
+
+            return ToAPISImageGenerationConfig()
+        elif LlmProviders.ZEXAPI == provider:
+            from litellm.llms.zexapi.image_generation.transformation import ZexAPIImageGenerationConfig
+
+            return ZexAPIImageGenerationConfig()
         return None
 
     @staticmethod
@@ -9061,6 +9073,14 @@ class ProviderConfigManager:
             from litellm.llms.runwayml.videos.transformation import RunwayMLVideoConfig
 
             return RunwayMLVideoConfig()
+        elif LlmProviders.TOAPIS == provider:
+            from litellm.llms.toapis.videos.transformation import ToAPISVideoConfig
+
+            return ToAPISVideoConfig()
+        elif LlmProviders.ZEXAPI == provider:
+            from litellm.llms.zexapi.videos.transformation import ZexAPIVideoConfig
+
+            return ZexAPIVideoConfig()
         return None
 
     @staticmethod
@@ -9181,6 +9201,10 @@ class ProviderConfigManager:
             )
 
             return get_openrouter_image_edit_config(model)
+        elif LlmProviders.ZEXAPI == provider:
+            from litellm.llms.zexapi.image_edit.transformation import ZexAPIImageEditConfig
+
+            return ZexAPIImageEditConfig()
         return None
 
     @staticmethod

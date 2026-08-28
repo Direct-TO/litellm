@@ -2418,6 +2418,24 @@
         "interactions": true
       }
     },
+    "toapis": {
+      "display_name": "ToAPIs (`toapis`)",
+      "url": "https://docs.toapis.com/docs/cn/quickstart",
+      "endpoints": {
+        "chat_completions": true,
+        "messages": false,
+        "responses": true,
+        "embeddings": false,
+        "image_generations": true,
+        "image_edits": false,
+        "audio_transcriptions": false,
+        "audio_speech": false,
+        "moderations": false,
+        "batches": false,
+        "rerank": false,
+        "video_generations": true
+      }
+    },
     "topaz": {
       "display_name": "Topaz (`topaz`)",
       "url": "https://docs.litellm.ai/docs/providers/topaz",
@@ -2658,6 +2676,24 @@
         "rerank": false,
         "a2a": true,
         "interactions": true
+      }
+    },
+    "zexapi": {
+      "display_name": "章鱼哥 AI / ZexAPI (`zexapi`)",
+      "url": "https://6l0ket291i.apifox.cn/",
+      "endpoints": {
+        "chat_completions": true,
+        "messages": false,
+        "responses": false,
+        "embeddings": false,
+        "image_generations": true,
+        "image_edits": true,
+        "audio_transcriptions": false,
+        "audio_speech": false,
+        "moderations": false,
+        "batches": false,
+        "rerank": false,
+        "video_generations": true
       }
     },
     "ragflow": {
