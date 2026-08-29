@@ -1,7 +1,9 @@
 import types
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Any, Final
+from urllib.parse import urlparse
 
 import httpx
 from httpx._types import FileContent, RequestFiles
@@ -9,6 +11,54 @@ from httpx._types import FileContent, RequestFiles
 from litellm.types.responses.main import *
 from litellm.types.router import GenericLiteLLMParams
 from litellm.types.videos.main import VideoCreateOptionalRequestParams
+
+_PROVIDER_FAILED_ERROR: Final[Mapping[str, object]] = MappingProxyType(
+    {
+        "code": "provider_failed",
+        "message": "The provider reported that video generation failed",
+    }
+)
+_MISSING_VIDEO_OUTPUT_ERROR: Final[Mapping[str, object]] = MappingProxyType(
+    {
+        "code": "provider_contract_error",
+        "message": "The provider completed video generation without a downloadable output URL",
+    }
+)
+
+
+def normalize_video_task_result(
+    status: str,
+    output_url: str | None,
+    error: Mapping[str, object] | None,
+    require_absolute_output_url: bool = False,
+) -> tuple[str, str | None, Mapping[str, object] | None]:
+    if status == "failed":
+        return (
+            status,
+            output_url,
+            error or _PROVIDER_FAILED_ERROR,
+        )
+    if status != "completed":
+        return status, output_url, error
+
+    parsed_output_url: Final = urlparse(output_url) if output_url else None
+    has_downloadable_output: Final = output_url is not None and (
+        not require_absolute_output_url
+        or (
+            parsed_output_url is not None
+            and parsed_output_url.scheme in ("http", "https")
+            and bool(parsed_output_url.netloc)
+        )
+    )
+    if has_downloadable_output:
+        return status, output_url, error
+
+    return (
+        "failed",
+        None,
+        _MISSING_VIDEO_OUTPUT_ERROR,
+    )
+
 
 if TYPE_CHECKING:
     from litellm.litellm_core_utils.litellm_logging import Logging as _LiteLLMLoggingObj
@@ -99,6 +149,23 @@ class BaseVideoConfig(ABC):
         /videos), instead of falling back to JSON.
         """
         return False
+
+    def get_video_create_input_reference_upload_request(
+        self,
+        video_create_optional_request_params: Mapping[str, object],
+        litellm_params: GenericLiteLLMParams,
+        headers: Mapping[str, str],
+    ) -> tuple[str, Mapping[str, str], Mapping[str, object], RequestFiles] | None:
+        return None
+
+    def transform_video_create_input_reference_upload_response(
+        self,
+        raw_response: httpx.Response,
+        video_create_optional_request_params: Mapping[str, object],
+    ) -> dict[str, object]:  # mutable-ok: video adapters require a mutable request dictionary
+        return dict(  # mutable-ok: video adapters require a mutable request dictionary
+            video_create_optional_request_params
+        )
 
     @abstractmethod
     def transform_video_create_request(

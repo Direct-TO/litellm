@@ -265,3 +265,52 @@ def test_anthropic_format_returns_public_team_model_name(
     assert response.status_code == 200
     assert [m["id"] for m in response.json()["data"]] == ["gpt-4-team"]
     assert internal_name not in response.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope", [None, "expand"])
+async def test_generation_only_listing_filters_unknown_capabilities(
+    patched_models,
+    monkeypatch,
+    scope,
+):
+    from litellm.proxy.auth import model_checks
+
+    monkeypatch.setattr(
+        proxy_server,
+        "general_settings",
+        {"model_list_generation_only": True},
+    )
+    monkeypatch.setattr(proxy_server, "_user_has_admin_view", lambda _auth: True)
+    monkeypatch.setattr(
+        model_checks,
+        "get_complete_model_list",
+        lambda **kwargs: ["gpt-4", "claude-sonnet"],
+    )
+
+    def _create_model_info_response(model_id, provider="openai", **kwargs):
+        response = _stub_model_info_response(model_id=model_id, provider=provider)
+        if model_id == "gpt-4":
+            response["capability"] = "text"
+        return response
+
+    monkeypatch.setattr(
+        proxy_utils,
+        "create_model_info_response",
+        _create_model_info_response,
+    )
+
+    response = await proxy_server.model_list(
+        user_api_key_dict=proxy_server.UserAPIKeyAuth(api_key="sk-test"),
+        scope=scope,
+    )
+
+    assert response["data"] == [
+        {
+            "id": "gpt-4",
+            "object": "model",
+            "created": 0,
+            "owned_by": "openai",
+            "capability": "text",
+        }
+    ]

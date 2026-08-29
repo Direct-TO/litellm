@@ -221,7 +221,7 @@ model_list:
         ServiceUnavailableErrorAllowedFails: 2
         BadGatewayErrorAllowedFails: 2
         NotFoundErrorAllowedFails: 1
-  - model_name: image-generation
+  - model_name: image-generation-only-toapis
     litellm_params:
       model: toapis/gpt-image-2
       api_key: os.environ/TOAPIS_API_KEY
@@ -259,6 +259,7 @@ general_settings:
   completion_model: deepseek-chat
   image_generation_model: image-generation
   video_generation_model: video-generation
+  model_list_generation_only: true
   # Opt-in: let CheckBatchCost track cost for unmanaged batches created with a raw
   # gs:// (Vertex) or s3:// (Bedrock) input_file_id. Requires a matching deployment
   # configured for the batched model. Defaults to false.

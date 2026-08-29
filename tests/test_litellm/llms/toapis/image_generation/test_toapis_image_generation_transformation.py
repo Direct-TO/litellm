@@ -61,7 +61,13 @@ def test_toapis_public_image_generation_forwards_provider_fields(respx_mock):
             "status": "completed",
             "progress": 100,
             "created_at": 1703884800,
-            "result": {"type": "image", "data": [{"url": "https://files.example/image.png"}]},
+            "result": {
+                "type": "image",
+                "data": [
+                    {"url": "https://files.example/image.png"},
+                    {"url": "https://files.example/image-2.png"},
+                ],
+            },
         }
     )
 
@@ -72,7 +78,10 @@ def test_toapis_public_image_generation_forwards_provider_fields(respx_mock):
         size="16:9",
     )
 
-    assert response.data[0].url == "https://files.example/image.png"
+    assert [image.url for image in response.data] == [
+        "https://files.example/image.png",
+        "https://files.example/image-2.png",
+    ]
     assert route.calls[0].request.headers["Authorization"] == "Bearer test-key"
     assert json.loads(route.calls[0].request.content) == {
         "model": "gpt-image-2",

@@ -1,15 +1,57 @@
 import asyncio
 import copy
 from types import SimpleNamespace
-from typing import Any, Dict
+from typing import Any
 
 import orjson
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from starlette.requests import Request
 from starlette.responses import Response
 
 from litellm.proxy._types import UserAPIKeyAuth
 from litellm.proxy.image_endpoints import endpoints
+
+
+@pytest.mark.parametrize("image_field", ["image", "image[]"])
+def test_image_edit_preserves_repeated_multipart_images_and_mask(monkeypatch, image_field):
+    captured_data: dict[str, Any] = {}
+
+    async def fake_base_process(self, **kwargs):
+        captured_data.update(self.data)
+        return {"data": [{"url": "https://files.example/result.png"}]}
+
+    monkeypatch.setattr(
+        endpoints.ProxyBaseLLMRequestProcessing,
+        "base_process_llm_request",
+        fake_base_process,
+    )
+    monkeypatch.setattr("litellm.proxy.proxy_server.general_settings", {})
+    monkeypatch.setattr("litellm.proxy.proxy_server.llm_router", None)
+    monkeypatch.setattr("litellm.proxy.proxy_server.proxy_config", {})
+    monkeypatch.setattr("litellm.proxy.proxy_server.user_model", None)
+
+    app = FastAPI()
+    app.include_router(endpoints.router)
+    app.dependency_overrides[endpoints.user_api_key_auth] = UserAPIKeyAuth
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/images/edits",
+            data={"prompt": "keep the subject", "model": "image-generation"},
+            files=[
+                (image_field, ("reference-1.png", b"first", "image/png")),
+                (image_field, ("reference-2.png", b"second", "image/png")),
+                ("mask", ("mask.png", b"mask", "image/png")),
+            ],
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"data": [{"url": "https://files.example/result.png"}]}
+    assert captured_data["prompt"] == "keep the subject"
+    assert captured_data["model"] == "image-generation"
+    assert [image.read() for image in captured_data["image"]] == [b"first", b"second"]
+    assert [mask.read() for mask in captured_data["mask"]] == [b"mask"]
 
 
 @pytest.mark.asyncio
@@ -22,7 +64,7 @@ async def test_image_generation_prompt_rerouting(monkeypatch):
     async def fake_update_request_status(**_: Any) -> None:
         await asyncio.sleep(0)
 
-    proxy_logger_calls: Dict[str, Any] = {}
+    proxy_logger_calls: dict[str, Any] = {}
 
     async def fake_pre_call_hook(*, user_api_key_dict, data, call_type):  # type: ignore[override]
         proxy_logger_calls["pre_call_input"] = copy.deepcopy(data)
@@ -54,7 +96,7 @@ async def test_image_generation_prompt_rerouting(monkeypatch):
         post_call_response_headers_hook=fake_post_call_response_headers_hook,
     )
 
-    captured_route_request_data: Dict[str, Any] = {}
+    captured_route_request_data: dict[str, Any] = {}
 
     async def fake_route_request(*, data, **kwargs):  # type: ignore[override]
         captured_route_request_data.update(data)

@@ -9911,6 +9911,9 @@ async def model_list(
     from litellm.llms.anthropic.common_utils import (
         create_anthropic_model_list_response,
     )
+    from litellm.proxy.common_utils.model_capability import (
+        generation_only_model_listing_enabled,
+    )
     from litellm.proxy.management_endpoints.common_utils import (
         _user_has_admin_privileges,
     )
@@ -9924,6 +9927,7 @@ async def model_list(
     wants_anthropic_format: Final = (
         http_request is not None and http_request.headers.get("anthropic-version") is not None
     )
+    generation_only_listing: Final = generation_only_model_listing_enabled(settings)
 
     # Validate scope parameter if provided
     if scope is not None and scope != "expand":
@@ -10002,7 +10006,8 @@ async def model_list(
                 llm_router=llm_router,
             )
             model_info["id"] = response_id
-            model_data.append(model_info)
+            if not generation_only_listing or "capability" in model_info:
+                model_data.append(model_info)
 
         if wants_anthropic_format:
             admin_listing: Final = cast(Sequence[ModelInfoResponse], model_data)  # cast-ok: rows built above
@@ -10046,7 +10051,8 @@ async def model_list(
             llm_router=llm_router,
         )
         model_info["id"] = response_id
-        model_data.append(model_info)
+        if not generation_only_listing or "capability" in model_info:
+            model_data.append(model_info)
 
     if wants_anthropic_format:
         listing: Final = cast(Sequence[ModelInfoResponse], model_data)  # cast-ok: rows built above

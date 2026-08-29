@@ -1,4 +1,6 @@
+import re
 from collections.abc import Mapping
+from decimal import Decimal, InvalidOperation
 from itertools import chain
 from typing import Final
 
@@ -7,6 +9,7 @@ from httpx._types import RequestFiles
 
 from litellm.litellm_core_utils.litellm_logging import Logging as LiteLLMLoggingObj
 from litellm.llms.base_llm.chat.transformation import BaseLLMException
+from litellm.llms.base_llm.videos.transformation import normalize_video_task_result
 from litellm.llms.openai.videos.transformation import OpenAIVideoConfig
 from litellm.types.router import GenericLiteLLMParams
 from litellm.types.videos.main import VideoCreateOptionalRequestParams, VideoObject
@@ -21,6 +24,7 @@ _SUPPORTED_PARAMS: Final[frozenset[str]] = frozenset(
         "extra_headers",
         "images",
         "input_reference",
+        "seconds",
         "size",
     )
 )
@@ -39,11 +43,29 @@ class ZexAPIVideoConfig(OpenAIVideoConfig):
         unsupported: Final = tuple(key for key in video_create_optional_params if key not in _SUPPORTED_PARAMS)
         if unsupported and not drop_params:
             raise ValueError(f"ZexAPI video generation does not support: {', '.join(unsupported)}")
+        self._validate_fixed_duration(model=model, seconds=video_create_optional_params.get("seconds"))
         return dict(  # mutable-ok: video request utility updates and removes extra_body
             (key, value)
             for key, value in video_create_optional_params.items()
-            if key in _SUPPORTED_PARAMS and key != "extra_headers"
+            if key in _SUPPORTED_PARAMS and key not in ("extra_headers", "seconds")
         )
+
+    @staticmethod
+    def _validate_fixed_duration(model: str, seconds: object) -> None:
+        if seconds is None:
+            return
+        duration_match: Final = re.search(r"(?:^|[-_])(\d+)s(?:$|[-_])", model)
+        if duration_match is None:
+            raise ValueError(f"ZexAPI model={model!r} does not declare a fixed duration")
+        try:
+            requested_seconds: Final = Decimal(str(seconds))
+        except InvalidOperation as exc:
+            raise ValueError(f"Invalid video duration: {seconds!r}") from exc
+        model_seconds: Final = Decimal(duration_match.group(1))
+        if requested_seconds != model_seconds:
+            raise ValueError(
+                f"ZexAPI model={model!r} generates {model_seconds} seconds, not {requested_seconds} seconds"
+            )
 
     def validate_environment(
         self,
@@ -133,8 +155,8 @@ class ZexAPIVideoConfig(OpenAIVideoConfig):
             if custom_llm_provider is not None
             else task.id
         )
-        normalized_status: Final = "in_progress" if task.status == "processing" else task.status
-        error: Final[dict[str, object] | None] = (  # mutable-ok: VideoObject error contract requires a dict
+        provider_status: Final = "in_progress" if task.status == "processing" else task.status
+        provider_error: Final[dict[str, object] | None] = (  # mutable-ok: VideoObject error contract requires a dict
             {  # mutable-ok: VideoObject error contract requires a dict
                 "code": task.error.code,
                 "message": task.error.message,
@@ -149,6 +171,13 @@ class ZexAPIVideoConfig(OpenAIVideoConfig):
                 else None
             )
         )
+        provider_output_url: Final = task.url or task.video_url
+        normalized_status, output_url, error = normalize_video_task_result(
+            status=provider_status,
+            output_url=provider_output_url,
+            error=provider_error,
+            require_absolute_output_url=True,
+        )
         return VideoObject(
             id=task_id,
             object="video",
@@ -159,5 +188,5 @@ class ZexAPIVideoConfig(OpenAIVideoConfig):
             progress=task.progress,
             size=task.size,
             model=task.model or request_model,
-            output_url=task.url or task.video_url,
+            output_url=output_url,
         )

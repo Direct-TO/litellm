@@ -1327,6 +1327,46 @@ def test_encode_video_id_with_provider_handles_azure_video_prefix():
     assert encoded_twice == encoded_id  # Should return the same encoded ID
 
 
+def test_managed_video_id_is_path_safe_and_preserves_original_delimiters():
+    from litellm.types.videos.utils import (
+        decode_video_id_with_provider,
+        encode_video_id_with_provider,
+    )
+
+    raw_video_id = "task/segment;part\u083f"
+    encoded_id = encode_video_id_with_provider(
+        video_id=raw_video_id,
+        provider="toapis",
+        model_id="seedance-2-5",
+    )
+
+    assert "/" not in encoded_id
+    assert "+" not in encoded_id
+    assert "=" not in encoded_id
+    assert decode_video_id_with_provider(encoded_id)["video_id"] == raw_video_id
+
+
+def test_decode_video_id_accepts_legacy_standard_base64_without_padding():
+    import base64
+
+    from litellm.types.videos.utils import decode_video_id_with_provider
+
+    raw_video_id = "\u083f"
+    legacy_payload = (
+        "litellm:custom_llm_provider:toapis;"
+        "model_id:seedance-2-5;"
+        f"video_id:{raw_video_id}"
+    )
+    legacy_id = f"video_{base64.b64encode(legacy_payload.encode()).decode().rstrip('=')}"
+
+    assert "/" in legacy_id
+    assert decode_video_id_with_provider(legacy_id) == {
+        "custom_llm_provider": "toapis",
+        "model_id": "seedance-2-5",
+        "video_id": raw_video_id,
+    }
+
+
 class TestVideoListTransformation:
     """Tests for video list request/response transformation with provider ID encoding."""
 

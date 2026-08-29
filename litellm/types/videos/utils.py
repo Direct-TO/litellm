@@ -30,9 +30,7 @@ def _add_base64_padding(value: str) -> str:
     Add missing base64 padding when IDs are copied without trailing '=' chars.
     """
     missing_padding: Final = len(value) % 4
-    if missing_padding:
-        value += "=" * (4 - missing_padding)
-    return value
+    return f"{value}{'=' * (4 - missing_padding)}" if missing_padding else value
 
 
 def encode_video_id_with_provider(video_id: str, provider: str, model_id: str | None = None) -> str:
@@ -49,9 +47,13 @@ def encode_video_id_with_provider(video_id: str, provider: str, model_id: str | 
         return video_id
 
     # ID is not encoded (even if it starts with video_), so encode it
-    assembled_id = str(SpecialEnums.LITELLM_MANAGED_VIDEO_COMPLETE_STR.value).format(provider, model_id or "", video_id)
+    assembled_id: Final = str(SpecialEnums.LITELLM_MANAGED_VIDEO_COMPLETE_STR.value).format(
+        provider,
+        model_id or "",
+        video_id,
+    )
 
-    base64_encoded_id: Final[str] = base64.b64encode(assembled_id.encode("utf-8")).decode("utf-8")
+    base64_encoded_id: Final[str] = base64.urlsafe_b64encode(assembled_id.encode("utf-8")).decode("utf-8").rstrip("=")
 
     return f"{VIDEO_ID_PREFIX}{base64_encoded_id}"
 
@@ -73,9 +75,8 @@ def decode_video_id_with_provider(encoded_video_id: str) -> DecodedVideoId:
         )
 
     try:
-        cleaned_id = encoded_video_id.replace(VIDEO_ID_PREFIX, "")
-        cleaned_id = _add_base64_padding(cleaned_id)
-        decoded_id: Final = base64.b64decode(cleaned_id.encode("utf-8")).decode("utf-8")
+        cleaned_id: Final = _add_base64_padding(encoded_video_id.removeprefix(VIDEO_ID_PREFIX))
+        decoded_id: Final = base64.urlsafe_b64decode(cleaned_id.encode("utf-8")).decode("utf-8")
 
         if ";" not in decoded_id:
             return DecodedVideoId(
@@ -84,20 +85,18 @@ def decode_video_id_with_provider(encoded_video_id: str) -> DecodedVideoId:
                 video_id=encoded_video_id,
             )
 
-        parts: Final = decoded_id.split(";")
+        parts: Final = decoded_id.split(";", 2)
+        if len(parts) < 3:
+            return DecodedVideoId(
+                custom_llm_provider=None,
+                model_id=None,
+                video_id=encoded_video_id,
+            )
 
-        custom_llm_provider = None
-        model_id = None
-        decoded_video_id = encoded_video_id
-
-        if len(parts) >= 3:
-            custom_llm_provider_part: Final = parts[0]
-            model_id_part: Final = parts[1]
-            video_id_part: Final = parts[2]
-
-            custom_llm_provider = custom_llm_provider_part.replace("litellm:custom_llm_provider:", "")
-            model_id = model_id_part.replace("model_id:", "")
-            decoded_video_id = video_id_part.replace("video_id:", "")
+        custom_llm_provider_part, model_id_part, video_id_part = parts
+        custom_llm_provider: Final = custom_llm_provider_part.removeprefix("litellm:custom_llm_provider:")
+        model_id: Final = model_id_part.removeprefix("model_id:")
+        decoded_video_id: Final = video_id_part.removeprefix("video_id:")
 
         return DecodedVideoId(
             custom_llm_provider=custom_llm_provider,

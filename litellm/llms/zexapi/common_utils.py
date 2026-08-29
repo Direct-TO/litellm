@@ -77,7 +77,7 @@ def parse_zexapi_task(raw_response: httpx.Response) -> ZexAPITaskResponse:
         return ZexAPITaskResponse.model_validate_json(raw_response.text)
     except ValueError as exc:
         raise BaseLLMException(
-            status_code=raw_response.status_code,
+            status_code=502,
             message=f"Invalid ZexAPI task response: {exc}",
             headers=raw_response.headers,
         ) from exc

@@ -1,19 +1,47 @@
 from collections.abc import Mapping
+from io import BufferedReader, BytesIO
 from itertools import chain
 from math import gcd
-from typing import Final
+from types import MappingProxyType
+from typing import Final, TypeAlias
 
 import httpx
 from httpx._types import RequestFiles
+from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 
 from litellm.exceptions import UnsupportedParamsError
+from litellm.images.utils import ImageEditRequestUtils
 from litellm.litellm_core_utils.litellm_logging import Logging as LiteLLMLoggingObj
+from litellm.llms.base_llm.videos.transformation import normalize_video_task_result
 from litellm.llms.openai.videos.transformation import OpenAIVideoConfig
 from litellm.types.router import GenericLiteLLMParams
 from litellm.types.videos.main import VideoCreateOptionalRequestParams, VideoObject
 from litellm.types.videos.utils import encode_video_id_with_provider
 
-from ..common_utils import build_toapis_endpoint, get_toapis_api_key, parse_toapis_task
+from ..common_utils import (
+    build_toapis_endpoint,
+    get_toapis_api_key,
+    parse_toapis_image_upload,
+    parse_toapis_task,
+)
+
+_ValidatedFileContent: TypeAlias = bytes | str | BytesIO | BufferedReader
+
+
+class _InputReference(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
+
+    input_reference: _ValidatedFileContent
+
+
+_INPUT_REFERENCE_ADAPTER: Final = TypeAdapter(_InputReference)
+
+
+def _rewind_file_content(value: _ValidatedFileContent) -> _ValidatedFileContent:
+    if isinstance(value, (bytes, str)):
+        return value
+    value.seek(0)
+    return value
 
 
 class ToAPISVideoConfig(OpenAIVideoConfig):
@@ -23,6 +51,7 @@ class ToAPISVideoConfig(OpenAIVideoConfig):
             "prompt",
             "seconds",
             "size",
+            "input_reference",
             "extra_headers",
         ]
 
@@ -38,16 +67,11 @@ class ToAPISVideoConfig(OpenAIVideoConfig):
                 model=model,
                 llm_provider="toapis",
             )
-        input_reference: Final = video_create_optional_params.get("input_reference")
-        if input_reference is not None and not drop_params:
-            raise ValueError("ToAPIs video generation accepts reference image URLs through extra_body.image_urls")
         mapped_duration: Final = self._duration(video_create_optional_params.get("seconds"))
         raw_size: Final = video_create_optional_params.get("size")
         mapped_aspect_ratio: Final = self._aspect_ratio(raw_size)
         forwarded_params: Final = tuple(
-            (key, value)
-            for key, value in video_create_optional_params.items()
-            if key not in ("input_reference", "seconds", "size")
+            (key, value) for key, value in video_create_optional_params.items() if key not in ("seconds", "size")
         )
         duration_params: Final = (("duration", mapped_duration),) if mapped_duration is not None else ()
         aspect_ratio_params: Final = (("aspect_ratio", mapped_aspect_ratio),) if mapped_aspect_ratio is not None else ()
@@ -78,6 +102,68 @@ class ToAPISVideoConfig(OpenAIVideoConfig):
     def use_multipart_form_data(self) -> bool:
         return False
 
+    def get_video_create_input_reference_upload_request(
+        self,
+        video_create_optional_request_params: Mapping[str, object],
+        litellm_params: GenericLiteLLMParams,
+        headers: Mapping[str, str],
+    ) -> tuple[str, Mapping[str, str], Mapping[str, object], RequestFiles] | None:
+        raw_input_reference: Final = video_create_optional_request_params.get("input_reference")
+        if raw_input_reference is None:
+            return None
+        try:
+            input_reference: Final = _INPUT_REFERENCE_ADAPTER.validate_python(
+                MappingProxyType({"input_reference": raw_input_reference})
+            ).input_reference
+        except ValidationError as exc:
+            raise TypeError("input_reference must be bytes or a binary file") from exc
+        if (
+            video_create_optional_request_params.get("image_urls") is not None
+            or video_create_optional_request_params.get("image_with_roles") is not None
+        ):
+            raise ValueError("ToAPIs video generation cannot combine input_reference with image URL fields")
+
+        content_type: Final = ImageEditRequestUtils.get_image_content_type(input_reference)
+        upload_content: Final = _rewind_file_content(input_reference)
+        raw_filename: Final = getattr(upload_content, "name", None)
+        filename: Final = raw_filename if isinstance(raw_filename, str) else "input_reference.png"
+        upload_headers: Final = MappingProxyType(
+            {key: value for key, value in headers.items() if key.lower() != "content-type"}
+        )
+        upload_files: Final[RequestFiles] = (("file", (filename, upload_content, content_type)),)
+        return (
+            build_toapis_endpoint(litellm_params.api_base, "/v1/uploads/images"),
+            upload_headers,
+            MappingProxyType({"purpose": "generation"}),
+            upload_files,
+        )
+
+    def transform_video_create_input_reference_upload_response(
+        self,
+        raw_response: httpx.Response,
+        video_create_optional_request_params: Mapping[str, object],
+    ) -> dict[str, object]:  # mutable-ok: video adapters require a mutable request dictionary
+        upload_data: Final = parse_toapis_image_upload(raw_response)
+        forwarded_params: Final = tuple(
+            (key, value) for key, value in video_create_optional_request_params.items() if key != "input_reference"
+        )
+        return dict(  # mutable-ok: video adapters require a mutable request dictionary
+            chain(
+                forwarded_params,
+                (
+                    (
+                        "image_with_roles",
+                        (
+                            {  # mutable-ok: provider JSON requires an object entry
+                                "url": upload_data.url,
+                                "role": "reference_image",
+                            },
+                        ),
+                    ),
+                ),
+            )
+        )
+
     def transform_video_create_request(
         self,
         model: str,
@@ -87,6 +173,8 @@ class ToAPISVideoConfig(OpenAIVideoConfig):
         litellm_params: GenericLiteLLMParams,
         headers: Mapping[str, str],
     ) -> tuple[dict[str, object], RequestFiles, str]:  # mutable-ok: video HTTP handler requires a dict
+        if video_create_optional_request_params.get("input_reference") is not None:
+            raise ValueError("ToAPIs input_reference must be uploaded before creating a video task")
         forwarded_params: Final = tuple(
             (key, value)
             for key, value in video_create_optional_request_params.items()
@@ -145,13 +233,19 @@ class ToAPISVideoConfig(OpenAIVideoConfig):
     ) -> VideoObject:
         task: Final = parse_toapis_task(raw_response)
         result_item: Final = task.result.data[0] if task.result is not None and task.result.data else None
-        error: Final[dict[str, object] | None] = (  # mutable-ok: VideoObject error contract requires a dict
+        provider_error: Final[dict[str, object] | None] = (  # mutable-ok: VideoObject error contract requires a dict
             {  # mutable-ok: VideoObject error contract requires a dict
                 "code": task.error.code,
                 "message": task.error.message,
             }
             if task.error is not None
             else None
+        )
+        normalized_status, output_url, error = normalize_video_task_result(
+            status=task.status,
+            output_url=result_item.url if result_item is not None else None,
+            error=provider_error,
+            require_absolute_output_url=True,
         )
         task_id: Final = (
             encode_video_id_with_provider(task.id, custom_llm_provider, request_model)
@@ -161,12 +255,12 @@ class ToAPISVideoConfig(OpenAIVideoConfig):
         return VideoObject(
             id=task_id,
             object="video",
-            status=task.status,
+            status=normalized_status,
             created_at=task.created_at,
             completed_at=task.completed_at,
             expires_at=task.expires_at,
             error=error,
             progress=task.progress,
             model=task.model or request_model,
-            output_url=result_item.url if result_item is not None else None,
+            output_url=output_url,
         )

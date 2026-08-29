@@ -7293,6 +7293,7 @@ def create_model_info_response(
     Raises HTTPException(400) for an unknown fallback_type.
     """
     from litellm.proxy.auth.model_checks import get_all_fallbacks
+    from litellm.proxy.common_utils.model_capability import resolve_model_capability
 
     base: Final[ModelInfoResponse] = {
         "id": model_id,
@@ -7326,6 +7327,14 @@ def create_model_info_response(
             max_input_tokens = configured_input
         if configured_output is not None:
             max_output_tokens = configured_output
+
+    capability: Final = resolve_model_capability(
+        model_name=model_id,
+        llm_router=llm_router,
+        get_model_info=get_model_info,
+    )
+    if capability is not None:
+        base["capability"] = capability
 
     if max_input_tokens is not None:
         base["max_input_tokens"] = max_input_tokens

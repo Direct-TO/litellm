@@ -1110,6 +1110,27 @@ def test_create_model_info_response_includes_mode_from_lookup():
     )
 
     assert response["mode"] == "embedding"
+    assert "capability" not in response
+
+
+@pytest.mark.parametrize(
+    ("mode", "capability"),
+    [
+        ("chat", "text"),
+        ("image_generation", "image"),
+        ("video_generation", "video"),
+        ("audio_speech", "audio"),
+    ],
+)
+def test_create_model_info_response_includes_capability(mode, capability):
+    response = create_model_info_response(
+        model_id="public-model",
+        provider="openai",
+        llm_router=None,
+        get_model_info=lambda _model: _fake_model_info(mode=mode),
+    )
+
+    assert response["capability"] == capability
 
 
 def test_create_model_info_response_omits_mode_when_lookup_raises():

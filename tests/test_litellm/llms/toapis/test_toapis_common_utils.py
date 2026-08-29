@@ -41,8 +41,10 @@ def test_toapis_pending_task_status_normalizes_to_queued():
 
 
 def test_toapis_unknown_task_status_is_rejected():
-    with pytest.raises(BaseLLMException, match="Invalid ToAPIs task response"):
+    with pytest.raises(BaseLLMException, match="Invalid ToAPIs task response") as exc_info:
         parse_toapis_task(_task_response("mystery"))
+
+    assert exc_info.value.status_code == 502
 
 
 def test_toapis_json_config_supports_responses():

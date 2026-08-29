@@ -7004,6 +7004,86 @@ class BaseLLMHTTPHandler:
 
         return model_response
 
+    def _prepare_video_create_optional_params(
+        self,
+        video_generation_provider_config: BaseVideoConfig,
+        video_generation_optional_request_params: Mapping[str, object],
+        litellm_params: GenericLiteLLMParams,
+        headers: Mapping[str, str],
+        client: HTTPHandler,
+        timeout: float | httpx.Timeout,
+    ) -> dict[str, object]:  # mutable-ok: video adapters require a mutable request dictionary
+        upload_request: Final = video_generation_provider_config.get_video_create_input_reference_upload_request(
+            video_create_optional_request_params=video_generation_optional_request_params,
+            litellm_params=litellm_params,
+            headers=headers,
+        )
+        if upload_request is None:
+            return dict(  # mutable-ok: video adapters require a mutable request dictionary
+                video_generation_optional_request_params
+            )
+
+        upload_url, upload_headers, upload_data, upload_files = upload_request
+        try:
+            upload_response: Final = client.post(
+                url=upload_url,
+                headers=dict(upload_headers),  # mutable-ok: HTTP client request boundary requires a concrete dict
+                data=dict(upload_data),  # mutable-ok: HTTP client request boundary requires a concrete dict
+                files=upload_files,
+                timeout=timeout,
+            )
+            if upload_response is None:
+                raise RuntimeError("Video reference upload returned no HTTP response")
+            return video_generation_provider_config.transform_video_create_input_reference_upload_response(
+                raw_response=upload_response,
+                video_create_optional_request_params=video_generation_optional_request_params,
+            )
+        except Exception as exc:  # noqa: BLE001  # shared HTTP clients surface provider-specific transport exceptions
+            raise self._handle_error(
+                e=exc,
+                provider_config=video_generation_provider_config,
+            )
+
+    async def _async_prepare_video_create_optional_params(
+        self,
+        video_generation_provider_config: BaseVideoConfig,
+        video_generation_optional_request_params: Mapping[str, object],
+        litellm_params: GenericLiteLLMParams,
+        headers: Mapping[str, str],
+        client: AsyncHTTPHandler,
+        timeout: float | httpx.Timeout,
+    ) -> dict[str, object]:  # mutable-ok: video adapters require a mutable request dictionary
+        upload_request: Final = video_generation_provider_config.get_video_create_input_reference_upload_request(
+            video_create_optional_request_params=video_generation_optional_request_params,
+            litellm_params=litellm_params,
+            headers=headers,
+        )
+        if upload_request is None:
+            return dict(  # mutable-ok: video adapters require a mutable request dictionary
+                video_generation_optional_request_params
+            )
+
+        upload_url, upload_headers, upload_data, upload_files = upload_request
+        try:
+            upload_response: Final = await client.post(
+                url=upload_url,
+                headers=dict(upload_headers),  # mutable-ok: HTTP client request boundary requires a concrete dict
+                data=dict(upload_data),  # mutable-ok: HTTP client request boundary requires a concrete dict
+                files=upload_files,
+                timeout=timeout,
+            )
+            if upload_response is None:
+                raise RuntimeError("Video reference upload returned no HTTP response")
+            return video_generation_provider_config.transform_video_create_input_reference_upload_response(
+                raw_response=upload_response,
+                video_create_optional_request_params=video_generation_optional_request_params,
+            )
+        except Exception as exc:  # noqa: BLE001  # shared HTTP clients surface provider-specific transport exceptions
+            raise self._handle_error(
+                e=exc,
+                provider_config=video_generation_provider_config,
+            )
+
     ###### VIDEO GENERATION HANDLER ######
     def video_generation_handler(
         self,
@@ -7067,6 +7147,15 @@ class BaseLLMHTTPHandler:
             litellm_params=dict(litellm_params),
         )
 
+        prepared_optional_params: Final = self._prepare_video_create_optional_params(
+            video_generation_provider_config=video_generation_provider_config,
+            video_generation_optional_request_params=video_generation_optional_request_params,
+            litellm_params=litellm_params,
+            headers=headers,
+            client=sync_httpx_client,
+            timeout=timeout,
+        )
+
         (
             data,
             files,
@@ -7074,7 +7163,7 @@ class BaseLLMHTTPHandler:
         ) = video_generation_provider_config.transform_video_create_request(
             model=model,
             prompt=prompt,
-            video_create_optional_request_params=video_generation_optional_request_params,
+            video_create_optional_request_params=prepared_optional_params,
             litellm_params=litellm_params,
             headers=headers,
             api_base=api_base,
@@ -7174,6 +7263,15 @@ class BaseLLMHTTPHandler:
             litellm_params=dict(litellm_params),
         )
 
+        prepared_optional_params: Final = await self._async_prepare_video_create_optional_params(
+            video_generation_provider_config=video_generation_provider_config,
+            video_generation_optional_request_params=video_generation_optional_request_params,
+            litellm_params=litellm_params,
+            headers=headers,
+            client=async_httpx_client,
+            timeout=timeout,
+        )
+
         (
             data,
             files,
@@ -7182,7 +7280,7 @@ class BaseLLMHTTPHandler:
             model=model,
             prompt=prompt,
             api_base=api_base,
-            video_create_optional_request_params=video_generation_optional_request_params,
+            video_create_optional_request_params=prepared_optional_params,
             litellm_params=litellm_params,
             headers=headers,
         )

@@ -18,7 +18,10 @@ def test_zexapi_image_generation_normalizes_to_url(monkeypatch):
             200,
             json={
                 "created": 1782108238,
-                "data": [{"url": "https://files.example/image.png", "b64_json": "aW1hZ2U="}],
+                "data": [
+                    {"url": "https://files.example/image.png", "b64_json": "aW1hZ2U="},
+                    {"url": "https://files.example/image-2.png", "b64_json": "aW1hZ2Uy"},
+                ],
             },
         ),
         model_response=litellm.ImageResponse(),
@@ -36,6 +39,8 @@ def test_zexapi_image_generation_normalizes_to_url(monkeypatch):
     }
     assert result.data[0].url == "https://files.example/image.png"
     assert result.data[0].b64_json is None
+    assert result.data[1].url == "https://files.example/image-2.png"
+    assert result.data[1].b64_json is None
 
 
 def test_zexapi_generation_request_is_openai_shaped():

@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from typing import Any, Literal
 
 from openai.types.audio.transcription_create_params import FileTypes
@@ -14,7 +15,7 @@ class VideoObject(BaseModel):
     created_at: int | None = None
     completed_at: int | None = None
     expires_at: int | None = None
-    error: dict[str, Any] | None = None
+    error: Mapping[str, object] | None = None
     progress: int | None = None
     remixed_from_video_id: str | None = None
     seconds: str | None = None

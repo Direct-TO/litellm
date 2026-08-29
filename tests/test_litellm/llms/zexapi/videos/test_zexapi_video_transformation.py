@@ -43,10 +43,21 @@ def test_zexapi_video_json_request_and_environment(monkeypatch):
     assert config.validate_environment({}, "sora-2-12s") == {"Authorization": "Bearer test-key"}
 
 
-def test_zexapi_video_rejects_openai_seconds_parameter():
-    with pytest.raises(ValueError, match="seconds"):
+def test_zexapi_video_accepts_duration_matching_model_slug():
+    assert (
         ZexAPIVideoConfig().map_openai_params(
             video_create_optional_params={"seconds": "12"},
+            model="sora-2-12s",
+            drop_params=False,
+        )
+        == {}
+    )
+
+
+def test_zexapi_video_rejects_duration_mismatching_model_slug():
+    with pytest.raises(ValueError, match="generates 12 seconds"):
+        ZexAPIVideoConfig().map_openai_params(
+            video_create_optional_params={"seconds": "5"},
             model="sora-2-12s",
             drop_params=False,
         )
@@ -116,6 +127,50 @@ def test_zexapi_failed_task_normalizes_string_error():
     )
 
     assert result.error == {"code": "generation_failed", "message": "content policy"}
+
+
+def test_zexapi_failed_task_without_error_gets_public_error():
+    result = ZexAPIVideoConfig().transform_video_status_retrieve_response(
+        raw_response=httpx.Response(
+            200,
+            json={
+                "id": "task_123",
+                "object": "video",
+                "status": "failed",
+                "progress": 0,
+            },
+        ),
+        logging_obj=Mock(),
+        custom_llm_provider="zexapi",
+    )
+
+    assert result.error == {
+        "code": "provider_failed",
+        "message": "The provider reported that video generation failed",
+    }
+
+
+def test_zexapi_completed_task_without_output_url_becomes_structured_failure():
+    result = ZexAPIVideoConfig().transform_video_status_retrieve_response(
+        raw_response=httpx.Response(
+            200,
+            json={
+                "id": "task_123",
+                "object": "video",
+                "status": "completed",
+                "progress": 100,
+            },
+        ),
+        logging_obj=Mock(),
+        custom_llm_provider="zexapi",
+    )
+
+    assert result.status == "failed"
+    assert result.output_url is None
+    assert result.error == {
+        "code": "provider_contract_error",
+        "message": "The provider completed video generation without a downloadable output URL",
+    }
 
 
 def test_zexapi_video_status_url_encodes_task_id():

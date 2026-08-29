@@ -912,3 +912,55 @@ async def video_extension(
             proxy_logging_obj=proxy_logging_obj,
             version=version,
         )
+
+
+@router.get(
+    "/v1/videos/{video_id:path}/content",
+    dependencies=(Depends(user_api_key_auth),),
+    response_class=Response,
+    include_in_schema=False,
+)
+@router.get(
+    "/videos/{video_id:path}/content",
+    dependencies=(Depends(user_api_key_auth),),
+    response_class=Response,
+    include_in_schema=False,
+)
+async def legacy_video_content_path(
+    video_id: str,
+    request: Request,
+    fastapi_response: Response,
+    user_api_key_dict: UserAPIKeyAuth = Depends(user_api_key_auth),  # noqa: B008  # FastAPI injects auth at request time
+) -> Response:
+    return await video_content(
+        video_id=video_id,
+        request=request,
+        fastapi_response=fastapi_response,
+        user_api_key_dict=user_api_key_dict,
+    )
+
+
+@router.get(
+    "/v1/videos/{video_id:path}",
+    dependencies=(Depends(user_api_key_auth),),
+    response_class=ORJSONResponse,
+    include_in_schema=False,
+)
+@router.get(
+    "/videos/{video_id:path}",
+    dependencies=(Depends(user_api_key_auth),),
+    response_class=ORJSONResponse,
+    include_in_schema=False,
+)
+async def legacy_video_status_path(
+    video_id: str,
+    request: Request,
+    fastapi_response: Response,
+    user_api_key_dict: UserAPIKeyAuth = Depends(user_api_key_auth),  # noqa: B008  # FastAPI injects auth at request time
+) -> object:
+    return await video_status(
+        video_id=video_id,
+        request=request,
+        fastapi_response=fastapi_response,
+        user_api_key_dict=user_api_key_dict,
+    )

@@ -61,6 +61,23 @@ class ToAPISTaskResponse(BaseModel):
     error: ToAPISTaskError | None = None
 
 
+class ToAPISImageUploadData(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    id: str
+    url: str
+    mime_type: str
+    size: int
+
+
+class ToAPISImageUploadResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    success: bool
+    message: str
+    data: ToAPISImageUploadData | None = None
+
+
 class _ToAPISModel(BaseModel):
     model_config = ConfigDict(extra="ignore", frozen=True)
 
@@ -111,10 +128,40 @@ def parse_toapis_task(raw_response: httpx.Response) -> ToAPISTaskResponse:
         return ToAPISTaskResponse.model_validate_json(raw_response.text)
     except ValueError as exc:
         raise BaseLLMException(
-            status_code=raw_response.status_code,
+            status_code=502,
             message=f"Invalid ToAPIs task response: {exc}",
             headers=raw_response.headers,
         ) from exc
+
+
+def parse_toapis_image_upload(raw_response: httpx.Response) -> ToAPISImageUploadData:
+    if raw_response.status_code >= 400:
+        raise BaseLLMException(
+            status_code=raw_response.status_code,
+            message=raw_response.text,
+            headers=raw_response.headers,
+        )
+    try:
+        upload_response: Final = ToAPISImageUploadResponse.model_validate_json(raw_response.text)
+    except ValueError as exc:
+        raise BaseLLMException(
+            status_code=502,
+            message=f"Invalid ToAPIs image upload response: {exc}",
+            headers=raw_response.headers,
+        ) from exc
+    if not upload_response.success:
+        raise BaseLLMException(
+            status_code=502,
+            message=upload_response.message,
+            headers=raw_response.headers,
+        )
+    if upload_response.data is None:
+        raise BaseLLMException(
+            status_code=502,
+            message="ToAPIs image upload succeeded without file metadata",
+            headers=raw_response.headers,
+        )
+    return upload_response.data
 
 
 class ToAPISModelInfo(BaseLLMModelInfo):

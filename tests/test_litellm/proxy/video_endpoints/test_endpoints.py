@@ -1,5 +1,4 @@
-"""
-Routing-contract tests for litellm/proxy/video_endpoints/endpoints.py
+"""Routing-contract tests for litellm/proxy/video_endpoints/endpoints.py
 
 Unlike the batches layer, every video endpoint funnels into a single downstream
 seam - ProxyBaseLLMRequestProcessing.base_process_llm_request - so there is no
@@ -26,28 +25,28 @@ patched with autospec so the real __init__ still stores self.data (captured via 
 mock's call args), and a brand-new kwarg added to this layer surfaces as a failure.
 """
 
+import base64
 from contextlib import ExitStack
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import orjson
 import pytest
+from fastapi import FastAPI, Response
+from fastapi.testclient import TestClient
+from starlette.datastructures import UploadFile as StarletteUploadFile
 
-
-import litellm.proxy.proxy_server as proxy_server
-import litellm.proxy.video_endpoints.endpoints as endpoints
+from litellm.proxy import proxy_server
 from litellm.proxy._types import UserAPIKeyAuth
 from litellm.proxy.common_request_processing import ProxyBaseLLMRequestProcessing
 from litellm.proxy.utils import ProxyLogging
+from litellm.proxy.video_endpoints import endpoints
 from litellm.router import Router
 from litellm.types.videos.utils import (
     encode_character_id_with_provider,
     encode_video_id_with_provider,
 )
-
-from fastapi import Response
-from starlette.datastructures import UploadFile as StarletteUploadFile
 
 # --------------------------------------------------------------------------- #
 # A real model-encoded video id: decodes (for real) to provider "azure",
@@ -64,10 +63,17 @@ AZURE_VIDEO_ID = encode_video_id_with_provider("video_orig123", "azure", VIDEO_M
 AZURE_CHARACTER_ID = encode_character_id_with_provider(
     "char_orig", "azure", VIDEO_MODEL_ID
 )
-RESOLVED_MODELS: Dict[str, str] = {VIDEO_MODEL_ID: "azure-sora"}
+RESOLVED_MODELS: dict[str, str] = {VIDEO_MODEL_ID: "azure-sora"}
 
 # Sentinel propagated by base_process for the passthrough endpoints.
 SENTINEL = object()
+
+
+def _legacy_video_id_with_path_separator() -> str:
+    payload = "litellm:custom_llm_provider:toapis;model_id:seedance-2-5;video_id:\u083fx"
+    encoded = base64.b64encode(payload.encode()).decode().rstrip("=")
+    assert "/" in encoded
+    return f"video_{encoded}"
 
 
 class FakeRequest:
@@ -76,8 +82,8 @@ class FakeRequest:
 
     def __init__(
         self,
-        headers: Optional[Dict[str, str]] = None,
-        query: Optional[Dict[str, str]] = None,
+        headers: dict[str, str] | None = None,
+        query: dict[str, str] | None = None,
         raw_body: bytes = b"{}",
     ):
         self.headers = headers or {}
@@ -100,7 +106,7 @@ class Harness:
     router: MagicMock
     resolve_model: MagicMock
 
-    def processor_data(self) -> Dict[str, Any]:
+    def processor_data(self) -> dict[str, Any]:
         """The exact `data` dict the processor was constructed with."""
         assert self.base_process.call_count == 1
         return dict(self.base_process.call_args.args[0].data)
@@ -204,7 +210,7 @@ def _user() -> UserAPIKeyAuth:
 
 
 async def call_generation(
-    harness: Harness, *, body: Dict[str, Any], input_reference=None
+    harness: Harness, *, body: dict[str, Any], input_reference=None
 ):
     harness.read_body.return_value = body
     return await endpoints.video_generation(
@@ -380,13 +386,42 @@ async def test_content__model_encoded_id(harness):
     }
 
 
+def test_legacy_standard_base64_id_with_slash_reaches_status_and_content(harness):
+    legacy_id = _legacy_video_id_with_path_separator()
+    app = FastAPI()
+    app.include_router(endpoints.router)
+    app.dependency_overrides[endpoints.user_api_key_auth] = _user
+
+    harness.base_process.return_value = {"id": legacy_id, "status": "queued"}
+    with TestClient(app) as client:
+        status_response = client.get(f"/v1/videos/{legacy_id}")
+        assert status_response.status_code == 200
+        assert harness.route_type() == "avideo_status"
+        assert harness.processor_data()["video_id"] == legacy_id
+
+        harness.base_process.reset_mock()
+        harness.base_process.return_value = b"VIDEOBYTES"
+        content_response = client.get(f"/v1/videos/{legacy_id}/content")
+        assert content_response.status_code == 200
+        assert content_response.content == b"VIDEOBYTES"
+        assert harness.route_type() == "avideo_content"
+        assert harness.processor_data()["video_id"] == legacy_id
+
+        harness.base_process.reset_mock()
+        harness.base_process.return_value = {"id": "char_raw"}
+        character_response = client.get("/v1/videos/characters/char_plain")
+
+    assert character_response.status_code == 200
+    assert harness.route_type() == "avideo_get_character"
+
+
 # =========================================================================== #
 #   POST /v1/videos/edits  -  video_edit                                       #
 # =========================================================================== #
 
 
 async def call_edit(
-    harness: Harness, *, body: Dict[str, Any], headers=None, query=None
+    harness: Harness, *, body: dict[str, Any], headers=None, query=None
 ):
     harness.read_body.return_value = dict(body)
     return await endpoints.video_edit(

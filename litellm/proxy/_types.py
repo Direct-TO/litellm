@@ -2539,6 +2539,15 @@ class ConfigGeneralSettings(LiteLLMPydanticObjectBase):
             "hidden model can still be called."
         ),
     )
+    model_list_generation_only: bool | None = Field(
+        None,
+        description=(
+            "When true, `/models` and `/v1/models` only list models whose configured deployments "
+            "consistently resolve to text, image, video, or speech generation. The response includes "
+            "a `capability` field for those models. Unknown, conflicting, embedding, rerank, OCR, "
+            "transcription, moderation, and search models are hidden from discovery but remain callable."
+        ),
+    )
     alerting: list | None = Field(
         None,
         description="List of alerting integrations. Today, just slack - `alerting: ['slack']`",

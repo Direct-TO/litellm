@@ -22,11 +22,17 @@ def test_media_services_hide_provider_deployments_behind_model_groups():
     image_deployments = [
         item["litellm_params"]["model"] for item in model_list if item["model_name"] == "image-generation"
     ]
+    generation_only_deployments = [
+        item["litellm_params"]["model"]
+        for item in model_list
+        if item["model_name"] == "image-generation-only-toapis"
+    ]
     video_deployments = [
         item["litellm_params"]["model"] for item in model_list if item["model_name"] == "video-generation"
     ]
 
-    assert image_deployments == ["zexapi/image2", "toapis/gpt-image-2"]
+    assert image_deployments == ["zexapi/image2"]
+    assert generation_only_deployments == ["toapis/gpt-image-2"]
     assert video_deployments == ["toapis/seedance-2-5"]
 
 
@@ -34,11 +40,15 @@ def test_media_service_defaults_and_failure_cooldown_policy():
     config = _dev_config()
     general_settings = ConfigGeneralSettings(**config["general_settings"])
     media_deployments = [
-        item for item in config["model_list"] if item["model_name"] in {"image-generation", "video-generation"}
+        item
+        for item in config["model_list"]
+        if item["model_name"]
+        in {"image-generation", "image-generation-only-toapis", "video-generation"}
     ]
 
     assert general_settings.image_generation_model == "image-generation"
     assert general_settings.video_generation_model == "video-generation"
+    assert general_settings.model_list_generation_only is True
     assert RouterGeneralSettings().pass_through_all_models is False
     assert "router_settings" not in config
     for deployment in media_deployments:
@@ -62,14 +72,17 @@ def test_router_builds_extensible_media_deployment_groups(monkeypatch):
     monkeypatch.setenv("ZEXAPI_API_KEY", "fake-zexapi-key")
     config = _dev_config()
     media_models = [
-        item for item in config["model_list"] if item["model_name"] in {"image-generation", "video-generation"}
+        item
+        for item in config["model_list"]
+        if item["model_name"]
+        in {"image-generation", "image-generation-only-toapis", "video-generation"}
     ]
     router = Router(model_list=media_models)
 
     groups = tuple((item["model_name"], item["litellm_params"]["model"]) for item in router.model_list)
     assert groups == (
         ("image-generation", "zexapi/image2"),
-        ("image-generation", "toapis/gpt-image-2"),
+        ("image-generation-only-toapis", "toapis/gpt-image-2"),
         ("video-generation", "toapis/seedance-2-5"),
     )
     assert router.routing_strategy == "simple-shuffle"

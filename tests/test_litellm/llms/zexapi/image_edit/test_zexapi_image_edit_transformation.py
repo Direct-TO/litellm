@@ -15,7 +15,10 @@ def test_zexapi_image_edit_uses_provider_url_and_preserves_dual_response(monkeyp
             200,
             json={
                 "created": 1782108238,
-                "data": [{"url": "https://files.example/edit.png", "b64_json": "ZWRpdA=="}],
+                "data": [
+                    {"url": "https://files.example/edit.png", "b64_json": "ZWRpdA=="},
+                    {"url": "https://files.example/edit-2.png", "b64_json": "ZWRpdDI="},
+                ],
             },
         ),
         logging_obj=Mock(),
@@ -25,6 +28,8 @@ def test_zexapi_image_edit_uses_provider_url_and_preserves_dual_response(monkeyp
     assert config.validate_environment({}, "image2", litellm_params={}) == {"Authorization": "Bearer test-key"}
     assert result.data[0].url == "https://files.example/edit.png"
     assert result.data[0].b64_json == "ZWRpdA=="
+    assert result.data[1].url == "https://files.example/edit-2.png"
+    assert result.data[1].b64_json == "ZWRpdDI="
 
 
 def test_zexapi_public_image_edit_uses_multipart_endpoint(respx_mock):
