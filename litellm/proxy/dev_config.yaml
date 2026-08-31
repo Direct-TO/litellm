@@ -260,6 +260,7 @@ general_settings:
   image_generation_model: image-generation
   video_generation_model: video-generation
   model_list_generation_only: true
+  store_prompts_in_spend_logs: true
   # Opt-in: let CheckBatchCost track cost for unmanaged batches created with a raw
   # gs:// (Vertex) or s3:// (Bedrock) input_file_id. Requires a matching deployment
   # configured for the batched model. Defaults to false.
