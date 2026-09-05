@@ -20,7 +20,7 @@ from ..common_utils import ToAPISTaskResponse, parse_toapis_task
 from .transformation import ToAPISImageGenerationConfig
 
 DEFAULT_POLLING_INTERVAL: Final = 5.0
-DEFAULT_MAX_POLLING_TIME: Final = 120.0
+DEFAULT_MAX_POLLING_TIME: Final = 300.0
 _OBJECT_MAP_ADAPTER: Final = TypeAdapter(dict[str, object])
 _OBJECT_ADAPTER: Final = TypeAdapter(object)
 _EMPTY_OBJECT_MAP: Final[Mapping[str, object]] = MappingProxyType({})
