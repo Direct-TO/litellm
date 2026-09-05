@@ -4,7 +4,9 @@ import httpx
 from pydantic import BaseModel, ConfigDict
 
 import litellm
+from litellm.litellm_core_utils.url_utils import encode_url_path_segment
 from litellm.llms.base_llm.chat.transformation import BaseLLMException
+from litellm.llms.base_llm.submission_utils import classify_http_submission_outcome, mark_submission_outcome
 from litellm.secret_managers.main import get_secret_str
 
 DEFAULT_API_BASE: Final = "https://zexapi.com/v1"
@@ -61,13 +63,27 @@ def build_zexapi_endpoint(api_base: str | None, endpoint: str) -> str:
     return str(resolved_base.copy_with(path=complete_path))
 
 
+def build_zexapi_gemini_endpoint(api_base: str | None, model: str) -> str:
+    """Build ZexAPI's Gemini-native image endpoint without inheriting a trailing /v1."""
+    resolved_base: Final = httpx.URL(get_zexapi_api_base(api_base))
+    if resolved_base.query or resolved_base.fragment:
+        raise ValueError("ZEXAPI_API_BASE must not contain a query string or fragment")
+    base_path: Final = resolved_base.path.rstrip("/")
+    root_path: Final = base_path.removesuffix("/v1beta").removesuffix("/v1")
+    encoded_model: Final = encode_url_path_segment(model, field_name="model")
+    return str(resolved_base.copy_with(path=f"{root_path}/v1beta/models/{encoded_model}:generateContent"))
+
+
 def raise_for_zexapi_error(raw_response: httpx.Response) -> None:
     if raw_response.status_code < 400:
         return
-    raise BaseLLMException(
-        status_code=raw_response.status_code,
-        message=raw_response.text,
-        headers=raw_response.headers,
+    raise mark_submission_outcome(
+        BaseLLMException(
+            status_code=raw_response.status_code,
+            message=raw_response.text,
+            headers=raw_response.headers,
+        ),
+        classify_http_submission_outcome(raw_response),
     )
 
 
@@ -76,8 +92,11 @@ def parse_zexapi_task(raw_response: httpx.Response) -> ZexAPITaskResponse:
     try:
         return ZexAPITaskResponse.model_validate_json(raw_response.text)
     except ValueError as exc:
-        raise BaseLLMException(
-            status_code=502,
-            message=f"Invalid ZexAPI task response: {exc}",
-            headers=raw_response.headers,
+        raise mark_submission_outcome(
+            BaseLLMException(
+                status_code=502,
+                message=f"Invalid ZexAPI task response: {exc}",
+                headers=raw_response.headers,
+            ),
+            "unknown",
         ) from exc

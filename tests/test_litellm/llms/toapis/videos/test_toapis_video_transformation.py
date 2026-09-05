@@ -52,16 +52,107 @@ def test_toapis_video_keeps_local_reference_for_upload():
         video_create_optional_params={"input_reference": reference},
         model="seedance-2-5",
         drop_params=False,
-    ) == {"input_reference": reference}
+    ) == {
+        "input_reference": reference,
+        "_toapis_reference_format": "image_with_roles",
+    }
 
 
 def test_toapis_video_service_rejects_other_models():
     with pytest.raises(litellm.UnsupportedParamsError):
         ToAPISVideoConfig().map_openai_params(
             video_create_optional_params={},
-            model="sora-2-vvip",
+            model="undocumented-video-model",
             drop_params=False,
         )
+
+
+@pytest.mark.parametrize(
+    "model,size,expected_field,expected_value",
+    [
+        ("seedance-2", "1920x1080", "aspect_ratio", "16:9"),
+        ("wan3.0-video", "1920x1080", "ratio", "16:9"),
+        ("Veo3.1-fast-official", "1920x1080", "size", "1920x1080"),
+        ("MiniMax-H3", "9:16", "aspect_ratio", "9:16"),
+        ("kling-v3", "1080x1920", "aspect_ratio", "9:16"),
+        ("grok-video-1.0", "1:1", "aspect_ratio", "1:1"),
+    ],
+)
+def test_toapis_video_maps_documented_model_size_contract(model, size, expected_field, expected_value):
+    mapped = ToAPISVideoConfig().map_openai_params(
+        video_create_optional_params={"seconds": "8", "size": size},
+        model=model,
+        drop_params=False,
+    )
+
+    assert mapped == {"duration": 8, expected_field: expected_value}
+
+
+@pytest.mark.parametrize(
+    "model,expected_format",
+    [
+        ("gemini-omni-flash", "image_urls"),
+        ("seedance-2-mini", "image_with_roles"),
+        ("kling-v2-6", "reference_images"),
+        ("kling-v3-omni", "metadata_image_list"),
+        ("grok-video-1.5", "image"),
+    ],
+)
+def test_toapis_video_selects_model_specific_reference_contract(model, expected_format):
+    mapped = ToAPISVideoConfig().map_openai_params(
+        video_create_optional_params={"input_reference": b"\x89PNG\r\n\x1a\n"},
+        model=model,
+        drop_params=False,
+    )
+
+    assert mapped["_toapis_reference_format"] == expected_format
+
+
+@pytest.mark.parametrize(
+    "reference_format,expected",
+    [
+        (
+            "image_with_roles",
+            {
+                "metadata": {"seed": 42},
+                "image_with_roles": [{"url": "https://files.example/ref.png", "role": "reference_image"}],
+            },
+        ),
+        ("image_urls", {"metadata": {"seed": 42}, "image_urls": ["https://files.example/ref.png"]}),
+        (
+            "reference_images",
+            {"metadata": {"seed": 42}, "reference_images": ["https://files.example/ref.png"]},
+        ),
+        ("image", {"metadata": {"seed": 42}, "image": "https://files.example/ref.png"}),
+        (
+            "metadata_image_list",
+            {"metadata": {"seed": 42, "image_list": [{"image_url": "https://files.example/ref.png"}]}},
+        ),
+    ],
+)
+def test_toapis_video_uploaded_reference_uses_model_specific_field(reference_format, expected):
+    result = ToAPISVideoConfig().transform_video_create_input_reference_upload_response(
+        raw_response=httpx.Response(
+            200,
+            json={
+                "success": True,
+                "message": "uploaded",
+                "data": {
+                    "id": "image_123",
+                    "url": "https://files.example/ref.png",
+                    "mime_type": "image/png",
+                    "size": 8,
+                },
+            },
+        ),
+        video_create_optional_request_params={
+            "input_reference": b"image",
+            "_toapis_reference_format": reference_format,
+            "metadata": {"seed": 42},
+        },
+    )
+
+    assert result == expected
 
 
 @pytest.mark.parametrize(
@@ -111,6 +202,87 @@ def test_toapis_video_task_response_exposes_output_url_and_provider_id():
     assert decoded["custom_llm_provider"] == "toapis"
     assert decoded["model_id"] == "seedance-2-5"
     assert decoded["video_id"] == "video_task_123"
+
+
+@pytest.mark.parametrize(
+    "response_id,task_id,expected_task_id",
+    [
+        ("video_task_123", "video_task_123", "video_task_123"),
+        ("video_resource_123", "video_task_123", "video_task_123"),
+        ("video_task_123", None, "video_task_123"),
+    ],
+)
+def test_toapis_video_create_accepts_live_task_envelope(response_id, task_id, expected_task_id):
+    payload = {
+        "id": response_id,
+        "object": "video",
+        "model": "seedance-2-5",
+        "status": "",
+        "progress": 0,
+        "created_at": 1788419339,
+    }
+    if task_id is not None:
+        payload["task_id"] = task_id
+
+    result = ToAPISVideoConfig().transform_video_create_response(
+        model="seedance-2-5",
+        raw_response=httpx.Response(200, json=payload),
+        logging_obj=Mock(),
+        custom_llm_provider="toapis",
+    )
+    decoded = decode_video_id_with_provider(result.id)
+
+    assert result.object == "video"
+    assert result.status == "queued"
+    assert result.progress == 0
+    assert decoded["video_id"] == expected_task_id
+
+
+def test_toapis_video_status_rejects_live_create_task_envelope():
+    with pytest.raises(BaseLLMException) as exc_info:
+        ToAPISVideoConfig().transform_video_status_retrieve_response(
+            raw_response=httpx.Response(
+                200,
+                json={
+                    "id": "video_task_123",
+                    "task_id": "video_task_123",
+                    "object": "video",
+                    "status": "",
+                    "progress": 0,
+                },
+            ),
+            logging_obj=Mock(),
+            custom_llm_provider="toapis",
+        )
+
+    assert exc_info.value.status_code == 502
+    assert "Invalid ToAPIs task response" in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    "status_code,expected_status_code",
+    [
+        (302, 502),
+        (429, 429),
+    ],
+)
+def test_toapis_video_create_only_normalizes_success_responses(status_code, expected_status_code):
+    with pytest.raises(BaseLLMException) as exc_info:
+        ToAPISVideoConfig().transform_video_create_response(
+            model="seedance-2-5",
+            raw_response=httpx.Response(
+                status_code,
+                json={
+                    "id": "video_task_123",
+                    "object": "video",
+                    "status": "",
+                },
+            ),
+            logging_obj=Mock(),
+            custom_llm_provider="toapis",
+        )
+
+    assert exc_info.value.status_code == expected_status_code
 
 
 def test_toapis_completed_task_without_output_url_becomes_structured_failure():
@@ -185,6 +357,33 @@ def test_toapis_public_video_generation_normalizes_pending_status(respx_mock):
         "generate_audio": True,
         "image_with_roles": [{"url": "https://files.example/reference.png", "role": "reference_image"}],
     }
+
+
+def test_toapis_public_video_generation_accepts_live_create_response(respx_mock):
+    route = respx_mock.post("https://toapis.com/v1/videos/generations").respond(
+        json={
+            "id": "video_task_123",
+            "task_id": "video_task_123",
+            "object": "video",
+            "model": "seedance-2-5",
+            "status": "",
+            "progress": 0,
+            "created_at": 1788419339,
+        }
+    )
+
+    response = litellm.video_generation(
+        model="toapis/seedance-2-5",
+        prompt="waves",
+        api_key="test-key",
+        seconds="4",
+        size="1920x1080",
+    )
+    decoded = decode_video_id_with_provider(response.id)
+
+    assert response.status == "queued"
+    assert decoded["video_id"] == "video_task_123"
+    assert route.call_count == 1
 
 
 def test_toapis_public_video_generation_uploads_input_reference(respx_mock):

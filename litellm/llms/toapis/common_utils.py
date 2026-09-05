@@ -1,5 +1,5 @@
 from collections.abc import Mapping, Sequence
-from typing import Annotated, Final, Literal
+from typing import Annotated, Final, Literal, cast
 
 import httpx
 from pydantic import BaseModel, BeforeValidator, ConfigDict
@@ -7,6 +7,7 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict
 import litellm
 from litellm.llms.base_llm.base_utils import BaseLLMModelInfo
 from litellm.llms.base_llm.chat.transformation import BaseLLMException
+from litellm.llms.base_llm.submission_utils import classify_http_submission_outcome, mark_submission_outcome
 from litellm.secret_managers.main import get_secret_str
 from litellm.types.llms.openai import AllMessageValues
 from litellm.types.utils import ProviderSpecificModelInfo
@@ -119,47 +120,117 @@ def build_toapis_endpoint(api_base: str | None, endpoint: str) -> str:
 
 def parse_toapis_task(raw_response: httpx.Response) -> ToAPISTaskResponse:
     if raw_response.status_code >= 400:
-        raise BaseLLMException(
-            status_code=raw_response.status_code,
-            message=raw_response.text,
-            headers=raw_response.headers,
+        raise mark_submission_outcome(
+            BaseLLMException(
+                status_code=raw_response.status_code,
+                message=raw_response.text,
+                headers=raw_response.headers,
+            ),
+            classify_http_submission_outcome(raw_response),
         )
     try:
         return ToAPISTaskResponse.model_validate_json(raw_response.text)
     except ValueError as exc:
-        raise BaseLLMException(
-            status_code=502,
-            message=f"Invalid ToAPIs task response: {exc}",
-            headers=raw_response.headers,
+        raise mark_submission_outcome(
+            BaseLLMException(
+                status_code=502,
+                message=f"Invalid ToAPIs task response: {exc}",
+                headers=raw_response.headers,
+            ),
+            "unknown",
+        ) from exc
+
+
+def parse_toapis_video_create_task(raw_response: httpx.Response) -> ToAPISTaskResponse:
+    """Parse a video-create response, including ToAPIs' accepted-task envelope."""
+    if raw_response.status_code >= 400:
+        raise mark_submission_outcome(
+            BaseLLMException(
+                status_code=raw_response.status_code,
+                message=raw_response.text,
+                headers=raw_response.headers,
+            ),
+            classify_http_submission_outcome(raw_response),
+        )
+    try:
+        raw_payload: object = cast(object, raw_response.json())
+        payload_to_validate: object = raw_payload
+        if isinstance(raw_payload, Mapping):
+            payload: Final = dict(cast(Mapping[str, object], raw_payload))
+            if (
+                200 <= raw_response.status_code < 300
+                and payload.get("object") == "video"
+                and payload.get("status") == ""
+            ):
+                raw_task_id: Final = payload.get("task_id")
+                raw_id: Final = payload.get("id")
+                task_id: Final = (
+                    raw_task_id.strip()
+                    if isinstance(raw_task_id, str) and raw_task_id.strip()
+                    else raw_id.strip()
+                    if isinstance(raw_id, str) and raw_id.strip()
+                    else None
+                )
+                if task_id is None:
+                    raise ValueError("ToAPIs video create response is missing a non-empty task ID")
+                payload.update(
+                    {
+                        "id": task_id,
+                        "object": "generation.task",
+                        "status": "queued",
+                    }
+                )
+            payload_to_validate = payload
+        return ToAPISTaskResponse.model_validate(payload_to_validate)
+    except ValueError as exc:
+        raise mark_submission_outcome(
+            BaseLLMException(
+                status_code=502,
+                message=f"Invalid ToAPIs task response: {exc}",
+                headers=raw_response.headers,
+            ),
+            "unknown",
         ) from exc
 
 
 def parse_toapis_image_upload(raw_response: httpx.Response) -> ToAPISImageUploadData:
     if raw_response.status_code >= 400:
-        raise BaseLLMException(
-            status_code=raw_response.status_code,
-            message=raw_response.text,
-            headers=raw_response.headers,
+        raise mark_submission_outcome(
+            BaseLLMException(
+                status_code=raw_response.status_code,
+                message=raw_response.text,
+                headers=raw_response.headers,
+            ),
+            "rejected",
         )
     try:
         upload_response: Final = ToAPISImageUploadResponse.model_validate_json(raw_response.text)
     except ValueError as exc:
-        raise BaseLLMException(
-            status_code=502,
-            message=f"Invalid ToAPIs image upload response: {exc}",
-            headers=raw_response.headers,
+        raise mark_submission_outcome(
+            BaseLLMException(
+                status_code=502,
+                message=f"Invalid ToAPIs image upload response: {exc}",
+                headers=raw_response.headers,
+            ),
+            "rejected",
         ) from exc
     if not upload_response.success:
-        raise BaseLLMException(
-            status_code=502,
-            message=upload_response.message,
-            headers=raw_response.headers,
+        raise mark_submission_outcome(
+            BaseLLMException(
+                status_code=502,
+                message=upload_response.message,
+                headers=raw_response.headers,
+            ),
+            "rejected",
         )
     if upload_response.data is None:
-        raise BaseLLMException(
-            status_code=502,
-            message="ToAPIs image upload succeeded without file metadata",
-            headers=raw_response.headers,
+        raise mark_submission_outcome(
+            BaseLLMException(
+                status_code=502,
+                message="ToAPIs image upload succeeded without file metadata",
+                headers=raw_response.headers,
+            ),
+            "rejected",
         )
     return upload_response.data
 

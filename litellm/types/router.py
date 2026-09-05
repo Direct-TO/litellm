@@ -86,6 +86,8 @@ class RouterConfig(BaseModel):
         "latency-based-routing",
     ] = "simple-shuffle"
     routing_groups: list[RoutingGroup] | None = None
+    enable_weighted_failover: bool = False
+    weighted_failover_policy: "WeightedFailoverPolicy | None" = None
 
     model_config = ConfigDict(protected_namespaces=())
 
@@ -104,6 +106,52 @@ class RetryPolicy(BaseModel):
     RateLimitErrorRetries: int | None = None
     ContentPolicyViolationErrorRetries: int | None = None
     InternalServerErrorRetries: int | None = None
+
+
+class WeightedFailoverPolicy(BaseModel):
+    """Optional filters for same-model-group deployment failover."""
+
+    call_types: list[str] | None = None
+    status_codes: list[int] | None = None
+    submission_outcomes: list[Literal["rejected", "accepted", "unknown"]] | None = None
+    failure_scope: Literal["deployment", "provider"] = "deployment"
+
+    model_config = ConfigDict(protected_namespaces=(), extra="forbid")
+
+    @field_validator("call_types")
+    @classmethod
+    def validate_call_types(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        normalized = [item.strip() for item in value]
+        if not normalized or any(not item for item in normalized):
+            raise ValueError("call_types must contain non-empty call type names")
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("call_types must not contain duplicates")
+        return normalized
+
+    @field_validator("status_codes")
+    @classmethod
+    def validate_status_codes(cls, value: list[int] | None) -> list[int] | None:
+        if value is None:
+            return None
+        if not value or any(status_code < 400 or status_code > 599 for status_code in value):
+            raise ValueError("status_codes must contain HTTP error statuses from 400 through 599")
+        if len(value) != len(set(value)):
+            raise ValueError("status_codes must not contain duplicates")
+        return value
+
+    @field_validator("submission_outcomes")
+    @classmethod
+    def validate_submission_outcomes(
+        cls,
+        value: list[Literal["rejected", "accepted", "unknown"]] | None,
+    ) -> list[Literal["rejected", "accepted", "unknown"]] | None:
+        if value is not None and not value:
+            raise ValueError("submission_outcomes must not be empty")
+        if value is not None and len(value) != len(set(value)):
+            raise ValueError("submission_outcomes must not contain duplicates")
+        return value
 
 
 class UpdateRouterConfig(BaseModel):
@@ -126,6 +174,8 @@ class UpdateRouterConfig(BaseModel):
     fallbacks: list[dict] | None = None
     context_window_fallbacks: list[dict] | None = None
     model_group_alias: dict[str, str | dict] | None = {}
+    enable_weighted_failover: bool | None = None
+    weighted_failover_policy: WeightedFailoverPolicy | None = None
     enable_tag_filtering: bool | None = None
     tag_routing_prefix: str | None = None
 

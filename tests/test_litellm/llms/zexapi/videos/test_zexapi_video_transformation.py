@@ -63,6 +63,21 @@ def test_zexapi_video_rejects_duration_mismatching_model_slug():
         )
 
 
+@pytest.mark.parametrize(
+    "model,seconds",
+    [("veo_3_1-fast", "8"), ("veo_3_1-lite", "8"), ("omni_flash-10s", "10")],
+)
+def test_zexapi_video_accepts_documented_fixed_family_durations(model, seconds):
+    assert (
+        ZexAPIVideoConfig().map_openai_params(
+            video_create_optional_params={"seconds": seconds},
+            model=model,
+            drop_params=False,
+        )
+        == {}
+    )
+
+
 @pytest.mark.parametrize("status", ["processing", "in_progress"])
 def test_zexapi_task_response_normalizes_status_and_exposes_url(status):
     config = ZexAPIVideoConfig()

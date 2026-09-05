@@ -10,6 +10,7 @@ from pydantic import TypeAdapter
 
 from litellm.litellm_core_utils.litellm_logging import Logging as LiteLLMLoggingObj
 from litellm.llms.base_llm.chat.transformation import BaseLLMException
+from litellm.llms.base_llm.submission_utils import mark_submission_outcome
 from litellm.llms.custom_httpx import http_handler as http_handlers
 from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler, HTTPHandler
 from litellm.types.router import GenericLiteLLMParams
@@ -79,7 +80,11 @@ class ToAPISImageGeneration:
             client if isinstance(client, HTTPHandler) else http_handlers._get_httpx_client()  # pyright: ignore[reportPrivateUsage, reportUnknownMemberType]  # shared client factory has legacy unparameterized dicts
         )
         self._log_request(logging_obj, prompt, prepared)
-        initial_response: Final = self._post_sync(sync_client, prepared, timeout)
+        try:
+            initial_response: Final = self._post_sync(sync_client, prepared, timeout)
+        except Exception as exc:
+            mark_submission_outcome(exc, "unknown")
+            raise
         final_response: Final = self._poll_sync(
             initial_response,
             prepared.url,
@@ -109,7 +114,11 @@ class ToAPISImageGeneration:
             llm_provider=LlmProviders.TOAPIS
         )
         self._log_request(logging_obj, prompt, prepared)
-        initial_response: Final = await self._post_async(async_client, prepared, timeout)
+        try:
+            initial_response: Final = await self._post_async(async_client, prepared, timeout)
+        except Exception as exc:
+            mark_submission_outcome(exc, "unknown")
+            raise
         final_response: Final = await self._poll_async(
             initial_response,
             prepared.url,
@@ -187,25 +196,29 @@ class ToAPISImageGeneration:
         interval: float = DEFAULT_POLLING_INTERVAL,
     ) -> httpx.Response:
         initial_task: Final = parse_toapis_task(initial_response)
-        self._raise_if_terminal_failure(initial_task, initial_response.headers)
-        if initial_task.status == "completed":
-            return initial_response
-        status_url: Final = self._config.get_status_url(complete_url, initial_task.id)
-        deadline: Final = self._monotonic() + max_wait
-        while True:
-            self._wait_sync(interval, deadline)
-            response = client.get(  # pyright: ignore[reportUnknownMemberType]  # HTTPHandler still uses unparameterized dicts
-                url=status_url,
-                headers=dict(headers),  # mutable-ok: legacy HTTP handler requires concrete headers
-                timeout=timeout,
-            )
-            if response.status_code == 429:
-                self._wait_sync(self._retry_after(response, interval), deadline)
-                continue
-            task = parse_toapis_task(response)
-            self._raise_if_terminal_failure(task, response.headers)
-            if task.status == "completed":
-                return response
+        try:
+            self._raise_if_terminal_failure(initial_task, initial_response.headers)
+            if initial_task.status == "completed":
+                return initial_response
+            status_url: Final = self._config.get_status_url(complete_url, initial_task.id)
+            deadline: Final = self._monotonic() + max_wait
+            while True:
+                self._wait_sync(interval, deadline)
+                response = client.get(  # pyright: ignore[reportUnknownMemberType]  # HTTPHandler still uses unparameterized dicts
+                    url=status_url,
+                    headers=dict(headers),  # mutable-ok: legacy HTTP handler requires concrete headers
+                    timeout=timeout,
+                )
+                if response.status_code == 429:
+                    self._wait_sync(self._retry_after(response, interval), deadline)
+                    continue
+                task = parse_toapis_task(response)
+                self._raise_if_terminal_failure(task, response.headers)
+                if task.status == "completed":
+                    return response
+        except Exception as exc:
+            mark_submission_outcome(exc, "accepted", provider_task_id=initial_task.id)
+            raise
 
     async def _poll_async(
         self,
@@ -218,25 +231,29 @@ class ToAPISImageGeneration:
         interval: float = DEFAULT_POLLING_INTERVAL,
     ) -> httpx.Response:
         initial_task: Final = parse_toapis_task(initial_response)
-        self._raise_if_terminal_failure(initial_task, initial_response.headers)
-        if initial_task.status == "completed":
-            return initial_response
-        status_url: Final = self._config.get_status_url(complete_url, initial_task.id)
-        deadline: Final = self._monotonic() + max_wait
-        while True:
-            await self._wait_async(interval, deadline)
-            response = await client.get(  # pyright: ignore[reportUnknownMemberType]  # AsyncHTTPHandler still uses unparameterized dicts
-                url=status_url,
-                headers=dict(headers),  # mutable-ok: legacy HTTP handler requires concrete headers
-                timeout=timeout,
-            )
-            if response.status_code == 429:
-                await self._wait_async(self._retry_after(response, interval), deadline)
-                continue
-            task = parse_toapis_task(response)
-            self._raise_if_terminal_failure(task, response.headers)
-            if task.status == "completed":
-                return response
+        try:
+            self._raise_if_terminal_failure(initial_task, initial_response.headers)
+            if initial_task.status == "completed":
+                return initial_response
+            status_url: Final = self._config.get_status_url(complete_url, initial_task.id)
+            deadline: Final = self._monotonic() + max_wait
+            while True:
+                await self._wait_async(interval, deadline)
+                response = await client.get(  # pyright: ignore[reportUnknownMemberType]  # AsyncHTTPHandler still uses unparameterized dicts
+                    url=status_url,
+                    headers=dict(headers),  # mutable-ok: legacy HTTP handler requires concrete headers
+                    timeout=timeout,
+                )
+                if response.status_code == 429:
+                    await self._wait_async(self._retry_after(response, interval), deadline)
+                    continue
+                task = parse_toapis_task(response)
+                self._raise_if_terminal_failure(task, response.headers)
+                if task.status == "completed":
+                    return response
+        except Exception as exc:
+            mark_submission_outcome(exc, "accepted", provider_task_id=initial_task.id)
+            raise
 
     def _post_sync(
         self,

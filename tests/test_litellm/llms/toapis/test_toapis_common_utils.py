@@ -4,6 +4,7 @@ import pytest
 import litellm
 from litellm.litellm_core_utils.get_llm_provider_logic import get_llm_provider
 from litellm.llms.base_llm.chat.transformation import BaseLLMException
+from litellm.llms.base_llm.submission_utils import get_submission_outcome
 from litellm.llms.openai_like.json_loader import JSONProviderRegistry
 from litellm.llms.toapis.common_utils import ToAPISModelInfo, parse_toapis_task
 from litellm.utils import ProviderConfigManager
@@ -45,6 +46,7 @@ def test_toapis_unknown_task_status_is_rejected():
         parse_toapis_task(_task_response("mystery"))
 
     assert exc_info.value.status_code == 502
+    assert get_submission_outcome(exc_info.value) == "unknown"
 
 
 def test_toapis_json_config_supports_responses():
@@ -104,7 +106,19 @@ def test_toapis_media_models_are_registered():
     model_cost = litellm.get_model_cost_map(url="")
 
     assert model_cost["toapis/gpt-image-2"]["mode"] == "image_generation"
+    assert model_cost["toapis/gemini-3.1-flash-image-preview"]["mode"] == "image_generation"
     assert model_cost["toapis/seedance-2-5"]["mode"] == "video_generation"
+    for model in (
+        "gemini-omni-flash",
+        "veo3.1-fast",
+        "seedance-2",
+        "wan3.0-video",
+        "happyhorse-1.1",
+        "MiniMax-H3",
+        "kling-v3-omni",
+        "grok-video-1.5",
+    ):
+        assert model_cost[f"toapis/{model}"]["mode"] == "video_generation"
 
 
 def test_toapis_chat_completion_uses_provider_url_and_key(respx_mock, monkeypatch):

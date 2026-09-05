@@ -83,6 +83,7 @@ from litellm.litellm_core_utils.sensitive_data_masker import (
     mask_credentials_in_payload,
     mask_sensitive_structure,
 )
+from litellm.llms.base_llm.submission_utils import get_submission_outcome
 from litellm.llms.openai_like.json_loader import JSONProviderRegistry
 from litellm.router_strategy.budget_limiter import RouterBudgetLimiting
 from litellm.router_strategy.least_busy import LeastBusyLoggingHandler
@@ -179,6 +180,7 @@ from litellm.router_utils.router_callbacks.track_deployment_metrics import (
     increment_deployment_successes_for_current_minute,
 )
 from litellm.scheduler import FlowItem, Scheduler
+from litellm.types.images.main import ImageEditOptionalRequestParams
 from litellm.types.llms.openai import (
     AllMessageValues,
     FileTypes,
@@ -216,6 +218,7 @@ from litellm.types.router import (
     RoutingStrategy,
     SearchToolTypedDict,
     TaggedPreRoutingStrategy,
+    WeightedFailoverPolicy,
 )
 from litellm.types.services import ServiceTypes
 from litellm.types.utils import (
@@ -236,6 +239,7 @@ from litellm.utils import (
     CustomStreamWrapper,
     EmbeddingResponse,
     ModelResponse,
+    ProviderConfigManager,
     Rules,
     function_setup,
     get_llm_provider,
@@ -346,6 +350,67 @@ _PreRoutingStrategyT = TypeVar("_PreRoutingStrategyT")
 
 _ALIAS_PARAMS_NEVER_FORWARDED: Final = frozenset({"model", "api_base", "api_key", "api_version"})
 _ALIAS_MARKER_FORWARDED_PARAMS_KWARG: Final = "_alias_marker_forwarded_params"
+_ROUTER_CALL_TYPE_KWARG: Final = "_router_call_type"
+_FAILED_DEPLOYMENT_PROVIDER_ATTR: Final = "failed_deployment_provider"
+_FAILED_STATIC_DEPLOYMENT_ID_ATTR: Final = "failed_static_deployment_id"
+_ROUTER_CALL_TYPE_TO_ENDPOINT: Final[Mapping[str, str]] = MappingProxyType(
+    {
+        "image_generation": "/v1/images/generations",
+        "aimage_generation": "/v1/images/generations",
+        "aimage_edit": "/v1/images/edits",
+        "video_generation": "/v1/videos",
+        "avideo_generation": "/v1/videos",
+    }
+)
+_IMAGE_GENERATION_ROUTER_CALL_TYPES: Final = frozenset(("image_generation", "aimage_generation"))
+_IMAGE_EDIT_ROUTER_CALL_TYPES: Final = frozenset(("aimage_edit",))
+_NON_IDEMPOTENT_MEDIA_CALL_TYPES: Final = frozenset(
+    (
+        "image_generation",
+        "aimage_generation",
+        "aimage_edit",
+        "video_generation",
+        "avideo_generation",
+        "avideo_remix",
+        "avideo_edit",
+        "avideo_extension",
+    )
+)
+_IMAGE_GENERATION_PREFLIGHT_PARAMS: Final = frozenset(
+    (
+        "aspect_ratio",
+        "background",
+        "imageConfig",
+        "image_prompt_strength",
+        "image_url",
+        "moderation",
+        "n",
+        "num_images",
+        "output_compression",
+        "output_format",
+        "prompt_upsampling",
+        "quality",
+        "raw",
+        "resolution",
+        "response_format",
+        "safety_tolerance",
+        "seed",
+        "size",
+        "style",
+        "tools",
+        "user",
+        "web_search_options",
+    )
+)
+# These are the parameters get_optional_params_image_gen currently drops when
+# the caller has opted into litellm.drop_params. Provider-specific image fields
+# remain strict because the public image path otherwise forwards them verbatim.
+_DROPPABLE_IMAGE_GENERATION_PREFLIGHT_PARAMS: Final = frozenset(
+    ("imageConfig", "n", "quality", "response_format", "size", "style", "tools", "user", "web_search_options")
+)
+_IMAGE_EDIT_PREFLIGHT_PARAMS: Final = frozenset(
+    ("background", "input_fidelity", "mask", "n", "quality", "response_format", "size", "user")
+)
 
 
 def _stream_chunks_have_generated_content(chunks: Sequence[ModelResponseStream]) -> bool:
@@ -605,6 +670,7 @@ class Router:
         health_check_ignore_transient_errors: bool = False,
         background_health_check_model_groups: Sequence[str] | None = None,
         enable_weighted_failover: bool = False,
+        weighted_failover_policy: WeightedFailoverPolicy | dict[str, object] | None = None,
         fallback_access_check: FallbackAccessCheck | None = None,
     ) -> None:
         """
@@ -642,6 +708,7 @@ class Router:
             deployment_affinity_ttl_seconds (int): TTL for user-key -> deployment affinity mapping. Defaults to 3600.
             ignore_invalid_deployments (bool): Ignores invalid deployments, and continues with other deployments. Default is to raise an error.
             enable_weighted_failover (bool): When True and the routing strategy is "simple-shuffle", a retryable failure on one deployment causes the request to re-pick (weighted) across the other deployments in the same model group before any cross-group fallback runs. Bounded by `max_fallbacks`. Async-only: currently honored by `router.acompletion()` and other async entrypoints. The sync `router.completion()` path falls back to the regular fallback flow. Defaults to False.
+            weighted_failover_policy (WeightedFailoverPolicy | dict | None): Optional AND-combined filters for same-group failover by Router call type, HTTP status, and provider submission outcome. `failure_scope="provider"` excludes every deployment backed by the failed provider; the default scope excludes only the failed deployment. Defaults to None, preserving the existing unrestricted behavior when weighted failover is enabled.
             fallback_access_check (Optional[FallbackAccessCheck]): Awaited before each cross-model-group fallback attempt on the async path; a fallback target it rejects is skipped. Defaults to None (every configured fallback is attempted).
         Returns:
             Router: An instance of the litellm.Router class.
@@ -814,7 +881,16 @@ class Router:
         self.cooldown_cache = CooldownCache(cache=self.cache, default_cooldown_time=self.cooldown_time)
         self.disable_cooldowns = disable_cooldowns
         self.enable_health_check_routing = enable_health_check_routing
+        if not isinstance(enable_weighted_failover, bool):
+            raise TypeError("enable_weighted_failover must be a bool")
         self.enable_weighted_failover = enable_weighted_failover
+        self.weighted_failover_policy: WeightedFailoverPolicy | None = None
+        if isinstance(weighted_failover_policy, dict):
+            self.weighted_failover_policy = WeightedFailoverPolicy.model_validate(weighted_failover_policy)
+        elif isinstance(weighted_failover_policy, WeightedFailoverPolicy):
+            self.weighted_failover_policy = weighted_failover_policy
+        elif weighted_failover_policy is not None:
+            raise TypeError("weighted_failover_policy must be a mapping or WeightedFailoverPolicy")
         self.health_check_ignore_transient_errors = health_check_ignore_transient_errors
         self.background_health_check_model_groups: frozenset[str] | None = (
             frozenset(background_health_check_model_groups)
@@ -3322,6 +3398,19 @@ class Router:
         # cool down the deployment every other tenant sharing this config relies on.
         effective_model_info: Final = kwargs.get("model_info") or deployment.get("model_info") or MappingProxyType({})
         self._set_failed_deployment_id_on_exception(exception, MappingProxyType({"model_info": effective_model_info}))
+        static_model_info: Final = deployment.get("model_info")
+        if isinstance(static_model_info, Mapping):
+            static_deployment_id: Final = static_model_info.get("id")
+            if (
+                isinstance(static_deployment_id, str)
+                and static_deployment_id
+                and not getattr(exception, _FAILED_STATIC_DEPLOYMENT_ID_ATTR, None)
+            ):
+                setattr(exception, _FAILED_STATIC_DEPLOYMENT_ID_ATTR, static_deployment_id)
+        if not getattr(exception, _FAILED_DEPLOYMENT_PROVIDER_ATTR, None):
+            failed_provider: Final = self._deployment_provider_for_failover(deployment)
+            if failed_provider is not None:
+                setattr(exception, _FAILED_DEPLOYMENT_PROVIDER_ATTR, failed_provider)
 
     def _update_kwargs_with_default_litellm_params(
         self, kwargs: dict, metadata_variable_name: str | None = "metadata"
@@ -4001,6 +4090,7 @@ class Router:
             kwargs["model"] = model
             kwargs["prompt"] = prompt
             kwargs["original_function"] = self._image_generation
+            kwargs[_ROUTER_CALL_TYPE_KWARG] = "image_generation"
             kwargs.setdefault("metadata", {}).update({"model_group": model})
             response: Final = self.function_with_fallbacks(**kwargs)
 
@@ -4016,8 +4106,10 @@ class Router:
                 model=model,
                 messages=[{"role": "user", "content": "prompt"}],
                 specific_deployment=kwargs.pop("specific_deployment", None),
+                request_kwargs=kwargs,
             )
             self._update_kwargs_with_deployment(deployment=deployment, kwargs=kwargs)
+            kwargs.pop(_ROUTER_CALL_TYPE_KWARG, None)
             data: Final = deployment["litellm_params"].copy()
 
             model_client: Final = self._get_async_openai_model_client(
@@ -4053,6 +4145,7 @@ class Router:
             kwargs["model"] = model
             kwargs["prompt"] = prompt
             kwargs["original_function"] = self._aimage_generation
+            kwargs[_ROUTER_CALL_TYPE_KWARG] = "aimage_generation"
             self._update_kwargs_before_fallbacks(model=model, kwargs=kwargs)
             response: Final = await self.async_function_with_fallbacks(**kwargs)
 
@@ -4070,22 +4163,25 @@ class Router:
 
     async def _aimage_generation(self, prompt: str, model: str, **kwargs):
         model_name = model
+        deployment: object | None = None
         try:
             verbose_router_logger.debug("Inside _image_generation()- model: %s; kwargs: %s", model, kwargs)
             parent_otel_span: Final = _get_parent_otel_span_from_kwargs(kwargs)
-            deployment: Final = await self.async_get_available_deployment(
+            selected_deployment = await self.async_get_available_deployment(
                 model=model,
                 messages=[{"role": "user", "content": "prompt"}],
                 specific_deployment=kwargs.pop("specific_deployment", None),
                 request_kwargs=kwargs,
             )
-            self._update_kwargs_with_deployment(deployment=deployment, kwargs=kwargs)
+            deployment = selected_deployment
+            self._update_kwargs_with_deployment(deployment=selected_deployment, kwargs=kwargs)
+            kwargs.pop(_ROUTER_CALL_TYPE_KWARG, None)
 
-            data: Final = deployment["litellm_params"].copy()
+            data: Final = selected_deployment["litellm_params"].copy()
             model_name = data["model"]
 
             model_client: Final = self._get_async_openai_model_client(
-                deployment=deployment,
+                deployment=selected_deployment,
                 kwargs=kwargs,
             )
 
@@ -4102,7 +4198,7 @@ class Router:
 
             ### CONCURRENCY-SAFE RPM CHECKS ###
             rpm_semaphore: Final = self._get_client(
-                deployment=deployment,
+                deployment=selected_deployment,
                 kwargs=kwargs,
                 client_type="max_parallel_requests",
             )
@@ -4114,12 +4210,12 @@ class Router:
                     - If allowed, increment the rpm limit (allows global value to be updated, concurrency-safe)
                     """
                     await self.async_routing_strategy_pre_call_checks(
-                        deployment=deployment, parent_otel_span=parent_otel_span
+                        deployment=selected_deployment, parent_otel_span=parent_otel_span
                     )
                     response = await response
             else:
                 await self.async_routing_strategy_pre_call_checks(
-                    deployment=deployment, parent_otel_span=parent_otel_span
+                    deployment=selected_deployment, parent_otel_span=parent_otel_span
                 )
                 response = await response
 
@@ -4130,6 +4226,12 @@ class Router:
             verbose_router_logger.info("litellm.aimage_generation(model=%s)\x1b[31m Exception %s\x1b[0m", model_name, e)
             if model_name is not None:
                 self.fail_calls[model_name] += 1
+            if deployment is not None:
+                self._stamp_failed_deployment_id_with_effective_model_info(
+                    e,
+                    cast(DeploymentTypedDict, deployment),
+                    kwargs,
+                )
             raise e
 
     async def atranscription(self, file: FileTypes, model: str, **kwargs):
@@ -4856,6 +4958,7 @@ class Router:
                 **kwargs,
                 "model": model_name,
             }
+            response_kwargs.pop(_ROUTER_CALL_TYPE_KWARG, None)
             # Only set custom_llm_provider if it's not None
             if custom_llm_provider is not None:
                 response_kwargs["custom_llm_provider"] = custom_llm_provider
@@ -5211,6 +5314,7 @@ class Router:
             return await self._aanthropic_messages_with_streaming_fallbacks(
                 original_function=original_function, **kwargs
             )
+        kwargs[_ROUTER_CALL_TYPE_KWARG] = call_type
         return await self._ageneric_api_call_with_fallbacks(original_function=original_function, **kwargs)
 
     def _generic_api_call_with_fallbacks(self, model: str, original_function: Callable, **kwargs):
@@ -6643,6 +6747,79 @@ class Router:
 
     #### [END] ASSISTANTS API ####
 
+    def _weighted_failover_policy_allows(self, exception: Exception, kwargs: Mapping[str, object]) -> bool:
+        """Return whether an exception satisfies every configured same-group failover filter."""
+        policy: Final = self.weighted_failover_policy
+        if policy is None:
+            return True
+
+        call_type: Final = kwargs.get(_ROUTER_CALL_TYPE_KWARG)
+        if policy.call_types is not None and call_type not in policy.call_types:
+            return False
+
+        status_code: Final = getattr(exception, "status_code", None)
+        if policy.status_codes is not None and status_code not in policy.status_codes:
+            return False
+
+        submission_outcome: Final = get_submission_outcome(exception)
+        if policy.submission_outcomes is not None and submission_outcome not in policy.submission_outcomes:
+            return False
+
+        return True
+
+    def _submission_outcome_blocks_reexecution(
+        self,
+        exception: Exception,
+        kwargs: Mapping[str, object],
+    ) -> bool:
+        """Fail closed when a media create may already have reached the provider."""
+        call_type: Final = kwargs.get(_ROUTER_CALL_TYPE_KWARG)
+        if call_type not in _NON_IDEMPOTENT_MEDIA_CALL_TYPES:
+            return False
+        submission_outcome: Final = get_submission_outcome(exception)
+        if submission_outcome in ("accepted", "unknown"):
+            return True
+        policy: Final = self.weighted_failover_policy
+        if submission_outcome is not None or policy is None or policy.submission_outcomes is None:
+            return False
+        return policy.call_types is None or call_type in policy.call_types
+
+    def _should_bypass_retries_for_submission_outcome(
+        self,
+        exception: Exception,
+        kwargs: Mapping[str, object],
+    ) -> bool:
+        if self._submission_outcome_blocks_reexecution(exception=exception, kwargs=kwargs):
+            return True
+        return (
+            get_submission_outcome(exception) == "rejected"
+            and self.enable_weighted_failover
+            and self.weighted_failover_policy is not None
+            and self._weighted_failover_policy_allows(exception=exception, kwargs=kwargs)
+        )
+
+    @staticmethod
+    def _deployment_provider_for_failover(deployment: Mapping[str, object]) -> str | None:
+        """Resolve the physical provider used to scope a same-group failover."""
+        litellm_params: Final[Mapping[str, object]] = cast(
+            Mapping[str, object],
+            deployment.get("litellm_params") or {},
+        )
+        raw_model: Final = litellm_params.get("model")
+        raw_custom_provider: Final = litellm_params.get("custom_llm_provider")
+        custom_provider: Final = raw_custom_provider if isinstance(raw_custom_provider, str) else None
+        if isinstance(raw_model, str):
+            try:
+                _, inferred_provider, _, _ = get_llm_provider(
+                    model=raw_model,
+                    custom_llm_provider=custom_provider,
+                )
+                if isinstance(inferred_provider, str) and inferred_provider:
+                    return inferred_provider
+            except Exception:
+                pass
+        return custom_provider
+
     async def _maybe_run_weighted_failover(
         self,
         exception: Exception,
@@ -6655,6 +6832,8 @@ class Router:
         """Same-model-group retry after a failed deployment; returns None if not applicable."""
         strategy, _ = self._get_routing_context(original_model_group, kwargs)
         if strategy != "simple-shuffle":
+            return None
+        if not self._weighted_failover_policy_allows(exception=exception, kwargs=kwargs):
             return None
 
         failed_id: Final[str | None] = getattr(exception, "failed_deployment_id", None)
@@ -6669,7 +6848,27 @@ class Router:
         if not isinstance(meta, dict):
             return None
         prev_excluded: Final = set(meta.get("_failover_excluded_ids") or [])
-        excluded: Final = prev_excluded | {failed_id}
+        newly_excluded: set[str] = {failed_id}
+        static_failed_id: Final = getattr(exception, _FAILED_STATIC_DEPLOYMENT_ID_ATTR, None)
+        if isinstance(static_failed_id, str) and static_failed_id:
+            newly_excluded.add(static_failed_id)
+        if self.weighted_failover_policy is not None and self.weighted_failover_policy.failure_scope == "provider":
+            raw_failed_provider: Final = getattr(exception, _FAILED_DEPLOYMENT_PROVIDER_ATTR, None)
+            failed_provider: str | None = raw_failed_provider if isinstance(raw_failed_provider, str) else None
+            if failed_provider is None:
+                for deployment in all_deployments:
+                    if (deployment.get("model_info") or {}).get("id") == failed_id:
+                        failed_provider = self._deployment_provider_for_failover(deployment)
+                        break
+            if failed_provider is not None:
+                for deployment in all_deployments:
+                    deployment_id = (deployment.get("model_info") or {}).get("id")
+                    if (
+                        isinstance(deployment_id, str)
+                        and self._deployment_provider_for_failover(deployment) == failed_provider
+                    ):
+                        newly_excluded.add(deployment_id)
+        excluded: Final = prev_excluded | newly_excluded
 
         all_ids: Final = {
             (d.get("model_info") or {}).get("id")
@@ -6695,10 +6894,18 @@ class Router:
 
         meta["_failover_excluded_ids"] = list(excluded)
 
-        entry: Final = {
+        entry: Final[dict[str, object]] = {
             "model": original_model_group,
             "_excluded_deployment_ids": list(excluded),
         }
+        remaining_orders: Final = [
+            order
+            for deployment in all_deployments
+            if (deployment.get("model_info") or {}).get("id") in remaining
+            and (order := litellm.utils._get_deployment_order(deployment)) is not None
+        ]
+        if remaining_orders:
+            entry["_target_order"] = min(remaining_orders)
         # Build a local copy so the weighted-failover keys do not leak back to
         # the caller's shared kwargs dict (any downstream fallback path reads
         # the same dict and must not inherit our `_excluded_deployment_ids`
@@ -6710,7 +6917,7 @@ class Router:
         }
         try:
             return await run_async_fallback(*args, **failover_kwargs)
-        except (openai.APIError, RouterRateLimitError, RouterRateLimitErrorBasic):
+        except (openai.APIError, RouterRateLimitError, RouterRateLimitErrorBasic) as failover_error:
             # Expected model-level failure on the retried deployment. All
             # litellm provider errors derive from openai.APIError; if every
             # remaining deployment in the group is in cooldown the router
@@ -6718,6 +6925,11 @@ class Router:
             # In either case defer to the regular fallback path. Programming
             # errors (AttributeError, KeyError, TypeError, etc.) intentionally
             # propagate so they remain visible.
+            if isinstance(failover_error, openai.APIError) and self._submission_outcome_blocks_reexecution(
+                exception=failover_error,
+                kwargs=kwargs,
+            ):
+                raise
             return None
 
     async def async_function_with_fallbacks_common_utils(
@@ -6738,6 +6950,8 @@ class Router:
         if verbose_router_logger.isEnabledFor(logging.DEBUG):
             verbose_router_logger.debug("Traceback%s", redact_string(traceback.format_exc()))
         original_exception: Final = e
+        if self._submission_outcome_blocks_reexecution(exception=e, kwargs=kwargs):
+            raise e
         fallback_model_group = None
         original_model_group: Final[str | None] = kwargs.get("model")
         fallback_failure_exception_str = ""
@@ -6758,12 +6972,20 @@ class Router:
         if include_fallback_errors:
             input_kwargs["include_fallback_errors"] = True
 
-        # ORDER-BASED FALLBACKS: prepend higher order levels to the fallback list
-        # Skip for error types that have their own dedicated fallback handlers
-        _skip_order_fallback: Final = isinstance(
+        # ORDER-BASED FALLBACKS: prepend higher order levels to the fallback list.
+        # Errors governed by the provider-scoped policy must enter weighted
+        # failover first, otherwise a higher order may select the same provider.
+        _skip_weighted_failover: Final = isinstance(
             e,
             (litellm.ContextWindowExceededError, litellm.ContentPolicyViolationError),
         )
+        _policy_controls_submission: Final = (
+            get_submission_outcome(e) == "rejected"
+            and self.enable_weighted_failover
+            and self.weighted_failover_policy is not None
+            and self._weighted_failover_policy_allows(exception=e, kwargs=kwargs)
+        )
+        _skip_order_fallback: Final = _skip_weighted_failover or _policy_controls_submission
         _request_team_id: Final[str | None] = (kwargs.get("metadata", {}) or {}).get("user_api_key_team_id")
         # Use wildcard-aware lookup so order-based fallback also works for model
         # groups resolved via pattern routing (e.g. `openai/*` -> `openai/gpt-4.1-mini`).
@@ -6814,7 +7036,7 @@ class Router:
                 return response
 
         # Weighted intra-group failover (simple-shuffle only); see _maybe_run_weighted_failover.
-        if self.enable_weighted_failover and not _skip_order_fallback and original_model_group is not None:
+        if self.enable_weighted_failover and not _skip_weighted_failover and original_model_group is not None:
             response = await self._maybe_run_weighted_failover(
                 exception=e,
                 original_model_group=original_model_group,
@@ -7125,6 +7347,8 @@ class Router:
         except Exception as e:
             current_attempt = None
             original_exception = e
+            if self._should_bypass_retries_for_submission_outcome(exception=e, kwargs=kwargs):
+                raise
             deployment_num_retries: Final = getattr(e, "num_retries", None)
 
             if (
@@ -7216,6 +7440,8 @@ class Router:
                     # Always track the latest error so we raise the most
                     # recent exception instead of the first one.
                     original_exception = e
+                    if self._should_bypass_retries_for_submission_outcome(exception=e, kwargs=kwargs):
+                        raise
 
                     ## LOGGING
                     kwargs = self.log_retry(kwargs=kwargs, e=e)
@@ -10936,6 +11162,7 @@ class Router:
             "retry_policy",
             "model_group_alias",
             "enable_weighted_failover",
+            "weighted_failover_policy",
             "enable_tag_filtering",
             "tag_routing_prefix",
         ]
@@ -10974,6 +11201,7 @@ class Router:
             "model_group_retry_policy",
             "model_group_alias",
             "enable_weighted_failover",
+            "weighted_failover_policy",
             "enable_tag_filtering",
             "tag_routing_prefix",
         ]
@@ -11003,6 +11231,19 @@ class Router:
                         value = RetryPolicy(**value)
                     if value is None or isinstance(value, RetryPolicy):
                         setattr(self, var, value)
+                elif var == "enable_weighted_failover":
+                    value = kwargs[var]
+                    if not isinstance(value, bool):
+                        raise TypeError("enable_weighted_failover must be a bool")
+                    setattr(self, var, value)
+                elif var == "weighted_failover_policy":
+                    value = kwargs[var]
+                    if isinstance(value, dict):
+                        value = WeightedFailoverPolicy.model_validate(value)
+                    if value is None or isinstance(value, WeightedFailoverPolicy):
+                        setattr(self, var, value)
+                    else:
+                        raise TypeError("weighted_failover_policy must be a mapping or WeightedFailoverPolicy")
                 else:
                     value = kwargs[var]
                     # only run routing strategy init if it has changed
@@ -11636,6 +11877,302 @@ class Router:
 
         return filtered_deployments
 
+    @staticmethod
+    def _filter_deployments_by_supported_endpoint(
+        model: str,
+        healthy_deployments: list[DeploymentTypedDict] | DeploymentTypedDict,
+        request_kwargs: Mapping[str, object] | None,
+    ) -> list[DeploymentTypedDict] | DeploymentTypedDict:
+        """Filter deployments only when their catalog explicitly declares endpoint support."""
+        call_type: Final = request_kwargs.get(_ROUTER_CALL_TYPE_KWARG) if request_kwargs is not None else None
+        endpoint: Final = _ROUTER_CALL_TYPE_TO_ENDPOINT.get(call_type) if isinstance(call_type, str) else None
+        if endpoint is None:
+            return healthy_deployments
+
+        was_specific: Final = isinstance(healthy_deployments, dict)
+        candidates: Final[list[DeploymentTypedDict]] = [healthy_deployments] if was_specific else healthy_deployments
+        filtered: list[DeploymentTypedDict] = []  # mutable-ok: Router selector API requires a concrete list
+        for deployment in candidates:
+            deployment_model_info: Mapping[str, object] = cast(
+                Mapping[str, object],
+                deployment.get("model_info") or {},  # pyright: ignore[reportUnknownMemberType]  # cast-ok: legacy model_info is an unparameterized dict
+            )
+            supported_endpoints: object = deployment_model_info.get("supported_endpoints")
+            if supported_endpoints is None:
+                deployment_litellm_params = deployment["litellm_params"]
+                catalog_model_candidates = (
+                    deployment_model_info.get("base_model"),
+                    (deployment_litellm_params["base_model"] if "base_model" in deployment_litellm_params else None),
+                    (deployment_litellm_params["model"] if "model" in deployment_litellm_params else None),
+                )
+                for catalog_model in catalog_model_candidates:
+                    if not isinstance(catalog_model, str):
+                        continue
+                    catalog_entry: Mapping[str, object] = cast(
+                        Mapping[str, object],
+                        litellm.model_cost.get(catalog_model, {}),  # pyright: ignore[reportUnknownMemberType]  # cast-ok: catalog values are runtime-validated objects
+                    )
+                    supported_endpoints = catalog_entry.get("supported_endpoints")
+                    if supported_endpoints is not None:
+                        break
+            # Unknown capability remains backward-compatible. Explicit catalogs fail closed.
+            if supported_endpoints is None or (
+                isinstance(supported_endpoints, Sequence)
+                and not isinstance(supported_endpoints, (bytes, bytearray, str))
+                and endpoint in supported_endpoints
+            ):
+                filtered.append(deployment)
+
+        if not filtered:
+            raise litellm.BadRequestError(
+                message=f"Model '{model}' has no deployment supporting endpoint {endpoint}",
+                model=model,
+                llm_provider="",
+            )
+        return filtered[0] if was_specific else filtered
+
+    @staticmethod
+    def _media_preflight_drop_settings(
+        request_kwargs: Mapping[str, object],
+    ) -> tuple[bool, frozenset[str]]:
+        raw_additional_drop_params: Final = request_kwargs.get("additional_drop_params")
+        additional_drop_params: Final[frozenset[str]] = (
+            frozenset(
+                item
+                for item in cast(
+                    Sequence[object],
+                    raw_additional_drop_params,  # cast-ok: guarded as a non-string Sequence below
+                )
+                if isinstance(item, str) and "." not in item
+            )
+            if isinstance(raw_additional_drop_params, Sequence)
+            and not isinstance(raw_additional_drop_params, (bytes, bytearray, str))
+            else frozenset()
+        )
+        return (
+            litellm.drop_params is True or request_kwargs.get("drop_params") is True,
+            additional_drop_params,
+        )
+
+    @staticmethod
+    def _image_generation_deployment_accepts_params(
+        deployment: DeploymentTypedDict,
+        request_params: Mapping[str, object],
+        drop_params: bool,
+    ) -> bool:
+        """Preflight image params through the deployment's pure provider mapper."""
+        litellm_params: Final = deployment["litellm_params"]
+        model_info: Final[Mapping[str, object]] = cast(
+            Mapping[str, object],
+            deployment.get("model_info") or {},  # pyright: ignore[reportUnknownMemberType]  # cast-ok: legacy model_info is an unparameterized dict
+        )
+        physical_model: Final = litellm_params["model"] if "model" in litellm_params else None
+        if not isinstance(physical_model, str):
+            return True
+
+        try:
+            provider_model, custom_llm_provider, _, _ = get_llm_provider(model=physical_model)
+            raw_base_model: Final = model_info.get("base_model") or (
+                litellm_params["base_model"] if "base_model" in litellm_params else None
+            )
+            config_model: Final = raw_base_model if isinstance(raw_base_model, str) else provider_model
+            image_config: Final = ProviderConfigManager.get_provider_image_generation_config(
+                model=config_model,
+                provider=LlmProviders(custom_llm_provider),
+            )
+        except Exception as exc:  # noqa: BLE001 - an unknown provider remains backward-compatible
+            verbose_router_logger.debug(
+                "Skipping image-generation parameter preflight for model=%s: %s",
+                physical_model,
+                exc,
+            )
+            return True
+        if image_config is None:
+            return True
+
+        try:
+            supported_params: Final[frozenset[str]] = frozenset(
+                image_config.get_supported_openai_params(model=config_model)
+            )
+            unsupported_params: Final[frozenset[str]] = frozenset(request_params).difference(supported_params)
+            if unsupported_params:
+                if not drop_params or not unsupported_params.issubset(_DROPPABLE_IMAGE_GENERATION_PREFLIGHT_PARAMS):
+                    return False
+            params_for_mapper: Final[dict[str, object]] = {  # mutable-ok: provider mapper requires a concrete dict
+                key: value for key, value in request_params.items() if key in supported_params
+            }
+            image_config.map_openai_params(  # pyright: ignore[reportUnknownMemberType]
+                non_default_params=params_for_mapper,
+                optional_params={},
+                model=config_model,
+                drop_params=drop_params,
+            )  # Base config retains legacy unparameterized dict types.
+        except (litellm.UnsupportedParamsError, TypeError, ValueError):
+            return False
+        except Exception as exc:  # noqa: BLE001 - unexpected mapper failures should not hide a deployment
+            verbose_router_logger.debug(
+                "Skipping image-generation parameter preflight for model=%s after mapper error: %s",
+                physical_model,
+                exc,
+            )
+            return True
+        return True
+
+    @staticmethod
+    def _image_edit_deployment_accepts_params(
+        deployment: DeploymentTypedDict,
+        request_params: Mapping[str, object],
+        drop_params: bool,
+    ) -> bool:
+        """Preflight image-edit params through the deployment's pure provider mapper."""
+        litellm_params: Final = deployment["litellm_params"]
+        model_info: Final[Mapping[str, object]] = cast(
+            Mapping[str, object],
+            deployment.get("model_info") or {},  # pyright: ignore[reportUnknownMemberType]  # cast-ok: legacy model_info is an unparameterized dict
+        )
+        physical_model: Final = litellm_params["model"] if "model" in litellm_params else None
+        if not isinstance(physical_model, str):
+            return True
+
+        try:
+            provider_model, custom_llm_provider, _, _ = get_llm_provider(model=physical_model)
+            raw_base_model: Final = model_info.get("base_model") or (
+                litellm_params["base_model"] if "base_model" in litellm_params else None
+            )
+            config_model: Final = raw_base_model if isinstance(raw_base_model, str) else provider_model
+            image_edit_config: Final = ProviderConfigManager.get_provider_image_edit_config(
+                model=config_model,
+                provider=LlmProviders(custom_llm_provider),
+            )
+        except Exception as exc:  # noqa: BLE001 - an unknown provider remains backward-compatible
+            verbose_router_logger.debug(
+                "Skipping image-edit parameter preflight for model=%s: %s",
+                physical_model,
+                exc,
+            )
+            return True
+        if image_edit_config is None:
+            return True
+
+        try:
+            supported_params: Final[frozenset[str]] = frozenset(
+                image_edit_config.get_supported_openai_params(  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]  # Base image-edit config retains a legacy bare-list return
+                    model=config_model
+                )
+            )
+            unsupported_params: Final[frozenset[str]] = frozenset(request_params).difference(supported_params)
+            if unsupported_params and not drop_params:
+                return False
+            params_for_mapper: Final[dict[str, object]] = {  # mutable-ok: provider mapper requires a concrete dict
+                key: value for key, value in request_params.items() if key in supported_params
+            }
+            image_edit_config.map_openai_params(  # pyright: ignore[reportUnknownMemberType]
+                image_edit_optional_params=cast(
+                    ImageEditOptionalRequestParams,
+                    params_for_mapper,  # cast-ok: keys are restricted to the image-edit request schema above
+                ),
+                model=config_model,
+                drop_params=drop_params,
+            )  # Base config retains legacy unparameterized dict types.
+        except (litellm.UnsupportedParamsError, TypeError, ValueError):
+            return False
+        except Exception as exc:  # noqa: BLE001 - unexpected mapper failures should not hide a deployment
+            verbose_router_logger.debug(
+                "Skipping image-edit parameter preflight for model=%s after mapper error: %s",
+                physical_model,
+                exc,
+            )
+            return True
+        return True
+
+    @classmethod
+    def _filter_deployments_by_image_generation_params(
+        cls,
+        model: str,
+        healthy_deployments: list[DeploymentTypedDict] | DeploymentTypedDict,
+        request_kwargs: Mapping[str, object] | None,
+    ) -> list[DeploymentTypedDict] | DeploymentTypedDict:
+        """Keep only deployments whose provider mapper accepts this image request."""
+        call_type: Final = request_kwargs.get(_ROUTER_CALL_TYPE_KWARG) if request_kwargs is not None else None
+        if call_type not in _IMAGE_GENERATION_ROUTER_CALL_TYPES or request_kwargs is None:
+            return healthy_deployments
+
+        drop_params, additional_drop_params = cls._media_preflight_drop_settings(request_kwargs)
+        request_params: Final[Mapping[str, object]] = MappingProxyType(
+            {
+                key: value
+                for key, value in request_kwargs.items()
+                if key in _IMAGE_GENERATION_PREFLIGHT_PARAMS and key not in additional_drop_params and value is not None
+            }
+        )
+        if not request_params:
+            return healthy_deployments
+
+        was_specific: Final = isinstance(healthy_deployments, dict)
+        candidates: Final[list[DeploymentTypedDict]] = [healthy_deployments] if was_specific else healthy_deployments
+        filtered: Final[list[DeploymentTypedDict]] = [  # mutable-ok: Router selector API requires a concrete list
+            deployment
+            for deployment in candidates
+            if cls._image_generation_deployment_accepts_params(
+                deployment=deployment,
+                request_params=request_params,
+                drop_params=drop_params,
+            )
+        ]
+        if not filtered:
+            parameter_names: Final = ", ".join(sorted(request_params))
+            raise litellm.BadRequestError(
+                message=(
+                    f"Model '{model}' has no deployment supporting image generation parameter(s): {parameter_names}"
+                ),
+                model=model,
+                llm_provider="",
+            )
+        return filtered[0] if was_specific else filtered
+
+    @classmethod
+    def _filter_deployments_by_image_edit_params(
+        cls,
+        model: str,
+        healthy_deployments: list[DeploymentTypedDict] | DeploymentTypedDict,
+        request_kwargs: Mapping[str, object] | None,
+    ) -> list[DeploymentTypedDict] | DeploymentTypedDict:
+        """Keep only deployments whose provider mapper accepts this image-edit request."""
+        call_type: Final = request_kwargs.get(_ROUTER_CALL_TYPE_KWARG) if request_kwargs is not None else None
+        if call_type not in _IMAGE_EDIT_ROUTER_CALL_TYPES or request_kwargs is None:
+            return healthy_deployments
+
+        drop_params, additional_drop_params = cls._media_preflight_drop_settings(request_kwargs)
+        request_params: Final[Mapping[str, object]] = MappingProxyType(
+            {
+                key: value
+                for key, value in request_kwargs.items()
+                if key in _IMAGE_EDIT_PREFLIGHT_PARAMS and key not in additional_drop_params and value is not None
+            }
+        )
+        if not request_params:
+            return healthy_deployments
+
+        was_specific: Final = isinstance(healthy_deployments, dict)
+        candidates: Final[list[DeploymentTypedDict]] = [healthy_deployments] if was_specific else healthy_deployments
+        filtered: Final[list[DeploymentTypedDict]] = [  # mutable-ok: Router selector API requires a concrete list
+            deployment
+            for deployment in candidates
+            if cls._image_edit_deployment_accepts_params(
+                deployment=deployment,
+                request_params=request_params,
+                drop_params=drop_params,
+            )
+        ]
+        if not filtered:
+            parameter_names: Final = ", ".join(sorted(request_params))
+            raise litellm.BadRequestError(
+                message=f"Model '{model}' has no deployment supporting image edit parameter(s): {parameter_names}",
+                model=model,
+                llm_provider="",
+            )
+        return filtered[0] if was_specific else filtered
+
     async def async_get_healthy_deployments(
         self,
         model: str,
@@ -11675,6 +12212,25 @@ class Router:
         healthy_deployments = filter_web_search_deployments(
             healthy_deployments=healthy_deployments,
             request_kwargs=request_kwargs,
+        )
+
+        healthy_deployments = self._filter_deployments_by_supported_endpoint(
+            model=model,
+            healthy_deployments=cast(
+                list[DeploymentTypedDict] | DeploymentTypedDict,
+                healthy_deployments,  # cast-ok: common deployment checks return the same Router deployment shape
+            ),
+            request_kwargs=request_kwargs,  # pyright: ignore[reportUnknownArgumentType]  # Router request kwargs retain legacy bare-dict typing
+        )
+        healthy_deployments = self._filter_deployments_by_image_generation_params(
+            model=model,
+            healthy_deployments=healthy_deployments,
+            request_kwargs=request_kwargs,  # pyright: ignore[reportUnknownArgumentType]  # Router request kwargs retain legacy bare-dict typing
+        )
+        healthy_deployments = self._filter_deployments_by_image_edit_params(
+            model=model,
+            healthy_deployments=healthy_deployments,
+            request_kwargs=request_kwargs,  # pyright: ignore[reportUnknownArgumentType]  # Router request kwargs retain legacy bare-dict typing
         )
 
         if verbose_router_logger.isEnabledFor(logging.DEBUG):
@@ -12441,6 +12997,25 @@ class Router:
             input=input,
             specific_deployment=specific_deployment,
             request_kwargs=request_kwargs,
+        )
+
+        healthy_deployments = self._filter_deployments_by_supported_endpoint(
+            model=model,
+            healthy_deployments=cast(
+                list[DeploymentTypedDict] | DeploymentTypedDict,
+                healthy_deployments,  # cast-ok: common deployment checks return the same Router deployment shape
+            ),
+            request_kwargs=request_kwargs,  # pyright: ignore[reportUnknownArgumentType]  # Router request kwargs retain legacy bare-dict typing
+        )
+        healthy_deployments = self._filter_deployments_by_image_generation_params(
+            model=model,
+            healthy_deployments=healthy_deployments,
+            request_kwargs=request_kwargs,  # pyright: ignore[reportUnknownArgumentType]  # Router request kwargs retain legacy bare-dict typing
+        )
+        healthy_deployments = self._filter_deployments_by_image_edit_params(
+            model=model,
+            healthy_deployments=healthy_deployments,
+            request_kwargs=request_kwargs,  # pyright: ignore[reportUnknownArgumentType]  # Router request kwargs retain legacy bare-dict typing
         )
 
         if isinstance(healthy_deployments, dict):

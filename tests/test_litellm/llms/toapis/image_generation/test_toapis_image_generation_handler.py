@@ -5,6 +5,7 @@ import httpx
 import pytest
 
 from litellm.llms.base_llm.chat.transformation import BaseLLMException
+from litellm.llms.base_llm.submission_utils import get_provider_task_id, get_submission_outcome
 from litellm.llms.toapis.image_generation.handler import ToAPISImageGeneration
 from litellm.llms.toapis.image_generation.transformation import ToAPISImageGenerationConfig
 from litellm.types.utils import ImageResponse
@@ -146,6 +147,8 @@ def test_toapis_failed_task_raises_provider_error():
         )
 
     assert exc_info.value.status_code == 500
+    assert get_submission_outcome(exc_info.value) == "accepted"
+    assert get_provider_task_id(exc_info.value) == "task_img_123"
 
 
 def test_toapis_retry_after_cannot_exceed_polling_deadline():
@@ -165,4 +168,40 @@ def test_toapis_retry_after_cannot_exceed_polling_deadline():
         )
 
     assert exc_info.value.status_code == 408
+    assert get_submission_outcome(exc_info.value) == "accepted"
+    assert get_provider_task_id(exc_info.value) == "task_img_123"
     assert clock.sleeps == [5, 115]
+
+
+def test_toapis_initial_http_failure_is_safe_to_fail_over():
+    handler = ToAPISImageGeneration(sync_sleep=lambda _: None, monotonic=lambda: 0.0)
+
+    with pytest.raises(BaseLLMException) as exc_info:
+        handler._poll_sync(
+            initial_response=httpx.Response(503, text="no available channel"),
+            complete_url="https://toapis.com/v1/images/generations",
+            headers={},
+            client=_SyncSequenceClient(()),
+            timeout=10,
+        )
+
+    assert exc_info.value.status_code == 503
+    assert get_submission_outcome(exc_info.value) == "rejected"
+    assert get_provider_task_id(exc_info.value) is None
+
+
+def test_toapis_poll_http_failure_preserves_accepted_task_provenance():
+    handler = ToAPISImageGeneration(sync_sleep=lambda _: None, monotonic=lambda: 0.0)
+
+    with pytest.raises(BaseLLMException) as exc_info:
+        handler._poll_sync(
+            initial_response=_task_response("queued", task_id="accepted-task"),
+            complete_url="https://toapis.com/v1/images/generations",
+            headers={},
+            client=_SyncSequenceClient((httpx.Response(503, text="poll unavailable"),)),
+            timeout=10,
+        )
+
+    assert exc_info.value.status_code == 503
+    assert get_submission_outcome(exc_info.value) == "accepted"
+    assert get_provider_task_id(exc_info.value) == "accepted-task"

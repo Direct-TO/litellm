@@ -55,13 +55,21 @@ class ZexAPIVideoConfig(OpenAIVideoConfig):
         if seconds is None:
             return
         duration_match: Final = re.search(r"(?:^|[-_])(\d+)s(?:$|[-_])", model)
-        if duration_match is None:
+        documented_seconds: Final[int | None] = (
+            8 if model.startswith("veo_3_1") else (10 if model.startswith("omni_flash-10s") else None)
+        )
+        if duration_match is None and documented_seconds is None:
             raise ValueError(f"ZexAPI model={model!r} does not declare a fixed duration")
         try:
             requested_seconds: Final = Decimal(str(seconds))
         except InvalidOperation as exc:
             raise ValueError(f"Invalid video duration: {seconds!r}") from exc
-        model_seconds: Final = Decimal(duration_match.group(1))
+        if duration_match is not None:
+            raw_model_seconds: str | int = duration_match.group(1)
+        else:
+            assert documented_seconds is not None
+            raw_model_seconds = documented_seconds
+        model_seconds: Final = Decimal(raw_model_seconds)
         if requested_seconds != model_seconds:
             raise ValueError(
                 f"ZexAPI model={model!r} generates {model_seconds} seconds, not {requested_seconds} seconds"

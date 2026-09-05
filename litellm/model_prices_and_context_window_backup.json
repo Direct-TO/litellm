@@ -39157,6 +39157,727 @@
             "image"
         ]
     },
+    "zexapi/gpt-image2": {
+        "litellm_provider": "zexapi",
+        "mode": "image_generation",
+        "source": "https://6l0ket291i.apifox.cn/447357296e0",
+        "supported_endpoints": [
+            "/v1/images/generations",
+            "/v1/images/edits"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "image"
+        ]
+    },
+    "toapis/gemini-2.5-flash-image-preview": {
+        "litellm_provider": "toapis",
+        "mode": "image_generation",
+        "source": "https://docs.toapis.com/docs/cn/api-reference/images/gemini-2.5-flash/generation",
+        "supported_endpoints": [
+            "/v1/images/generations"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "image"
+        ]
+    },
+    "toapis/gemini-3-pro-image-preview": {
+        "litellm_provider": "toapis",
+        "mode": "image_generation",
+        "source": "https://docs.toapis.com/docs/cn/api-reference/images/gemini-3-pro-image/generation",
+        "supported_endpoints": [
+            "/v1/images/generations"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "image"
+        ]
+    },
+    "toapis/gemini-3.1-flash-image-preview": {
+        "litellm_provider": "toapis",
+        "mode": "image_generation",
+        "source": "https://docs.toapis.com/docs/cn/api-reference/images/gemini-3.1-flash/generation",
+        "supported_endpoints": [
+            "/v1/images/generations"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "image"
+        ]
+    },
+    "toapis/gemini-omni-flash": {
+        "litellm_provider": "toapis",
+        "mode": "video_generation",
+        "source": "https://docs.toapis.com/docs/cn/api-reference/videos/gemini-omni-flash/generation",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "toapis/gemini-omni-flash-preview-official": {
+        "litellm_provider": "toapis",
+        "mode": "video_generation",
+        "source": "https://docs.toapis.com/docs/cn/api-reference/videos/gemini-omni-flash-preview-official/generation",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image",
+            "video"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "toapis/veo3.1-fast": {
+        "litellm_provider": "toapis",
+        "mode": "video_generation",
+        "source": "https://docs.toapis.com/docs/cn/api-reference/videos/veo3/generation",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "toapis/veo3.1-quality": {
+        "litellm_provider": "toapis",
+        "mode": "video_generation",
+        "source": "https://docs.toapis.com/docs/cn/api-reference/videos/veo3/generation",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "toapis/veo3.1-lite": {
+        "litellm_provider": "toapis",
+        "mode": "video_generation",
+        "source": "https://docs.toapis.com/docs/cn/api-reference/videos/veo3/generation",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "toapis/Veo3.1-fast-official": {
+        "litellm_provider": "toapis",
+        "mode": "video_generation",
+        "source": "https://docs.toapis.com/docs/cn/api-reference/videos/veo3-official/generation",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "toapis/Veo3.1-quality-official": {
+        "litellm_provider": "toapis",
+        "mode": "video_generation",
+        "source": "https://docs.toapis.com/docs/cn/api-reference/videos/veo3-official/generation",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "toapis/Veo3.1-lite-official": {
+        "litellm_provider": "toapis",
+        "mode": "video_generation",
+        "source": "https://docs.toapis.com/docs/cn/api-reference/videos/veo3-official/generation",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "toapis/seedance-2": {
+        "litellm_provider": "toapis",
+        "mode": "video_generation",
+        "source": "https://docs.toapis.com/docs/cn/api-reference/videos/seedance-2/generation",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image",
+            "video",
+            "audio"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "toapis/seedance-2-fast": {
+        "litellm_provider": "toapis",
+        "mode": "video_generation",
+        "source": "https://docs.toapis.com/docs/cn/api-reference/videos/seedance-2/generation",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image",
+            "video",
+            "audio"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "toapis/seedance-2-mini": {
+        "litellm_provider": "toapis",
+        "mode": "video_generation",
+        "source": "https://docs.toapis.com/docs/cn/api-reference/videos/seedance-2/generation",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image",
+            "video",
+            "audio"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "toapis/wan3.0-video": {
+        "litellm_provider": "toapis",
+        "mode": "video_generation",
+        "source": "https://docs.toapis.com/docs/cn/api-reference/videos/wan3.0/generation",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image",
+            "video",
+            "audio"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "toapis/happyhorse-1.1": {
+        "litellm_provider": "toapis",
+        "mode": "video_generation",
+        "source": "https://docs.toapis.com/docs/cn/api-reference/videos/happyhorse/generation",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image",
+            "video"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "toapis/MiniMax-H3": {
+        "litellm_provider": "toapis",
+        "mode": "video_generation",
+        "source": "https://docs.toapis.com/docs/cn/api-reference/videos/minimax-h3/generation",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image",
+            "video",
+            "audio"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "toapis/kling-v2-6": {
+        "litellm_provider": "toapis",
+        "mode": "video_generation",
+        "source": "https://docs.toapis.com/docs/cn/api-reference/videos/kling-2-6/generation",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "toapis/kling-v3": {
+        "litellm_provider": "toapis",
+        "mode": "video_generation",
+        "source": "https://docs.toapis.com/docs/cn/api-reference/videos/kling-v3/generation",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "toapis/kling-3.0-turbo": {
+        "litellm_provider": "toapis",
+        "mode": "video_generation",
+        "source": "https://docs.toapis.com/docs/cn/api-reference/videos/kling-3.0-turbo/generation",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "toapis/kling-v3-omni": {
+        "litellm_provider": "toapis",
+        "mode": "video_generation",
+        "source": "https://docs.toapis.com/docs/cn/api-reference/videos/kling-v3-omni/generation",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image",
+            "video"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "toapis/kling-video-o1": {
+        "litellm_provider": "toapis",
+        "mode": "video_generation",
+        "source": "https://docs.toapis.com/docs/cn/api-reference/videos/kling-video-o1/generation",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image",
+            "video"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "toapis/grok-video-1.0": {
+        "litellm_provider": "toapis",
+        "mode": "video_generation",
+        "source": "https://docs.toapis.com/docs/cn/api-reference/videos/grok-video/generation",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "toapis/grok-video-1.5": {
+        "litellm_provider": "toapis",
+        "mode": "video_generation",
+        "source": "https://docs.toapis.com/docs/cn/api-reference/videos/grok-video-1.5/generation",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "zexapi/gemini-3-pro-image-preview": {
+        "litellm_provider": "zexapi",
+        "mode": "image_generation",
+        "source": "https://6l0ket291i.apifox.cn/466136668e0",
+        "supported_endpoints": [
+            "/v1/images/generations"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "image"
+        ]
+    },
+    "zexapi/gemini-3.1-flash-image-preview": {
+        "litellm_provider": "zexapi",
+        "mode": "image_generation",
+        "source": "https://6l0ket291i.apifox.cn/466136668e0",
+        "supported_endpoints": [
+            "/v1/images/generations"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "image"
+        ]
+    },
+    "zexapi/omni_flash-10s": {
+        "litellm_provider": "zexapi",
+        "mode": "video_generation",
+        "source": "https://6l0ket291i.apifox.cn/462450037e0",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image",
+            "video"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "zexapi/omni_flash-10s-fl": {
+        "litellm_provider": "zexapi",
+        "mode": "video_generation",
+        "source": "https://6l0ket291i.apifox.cn/462450037e0",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "zexapi/veo_3_1": {
+        "litellm_provider": "zexapi",
+        "mode": "video_generation",
+        "source": "https://6l0ket291i.apifox.cn/424653897e0",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "zexapi/veo_3_1-fl": {
+        "litellm_provider": "zexapi",
+        "mode": "video_generation",
+        "source": "https://6l0ket291i.apifox.cn/424653897e0",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "zexapi/veo_3_1-hd": {
+        "litellm_provider": "zexapi",
+        "mode": "video_generation",
+        "source": "https://6l0ket291i.apifox.cn/424653897e0",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "zexapi/veo_3_1-hd-fl": {
+        "litellm_provider": "zexapi",
+        "mode": "video_generation",
+        "source": "https://6l0ket291i.apifox.cn/424653897e0",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "zexapi/veo_3_1-4K": {
+        "litellm_provider": "zexapi",
+        "mode": "video_generation",
+        "source": "https://6l0ket291i.apifox.cn/424653897e0",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "zexapi/veo_3_1-4K-fl": {
+        "litellm_provider": "zexapi",
+        "mode": "video_generation",
+        "source": "https://6l0ket291i.apifox.cn/424653897e0",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "zexapi/veo_3_1-fast": {
+        "litellm_provider": "zexapi",
+        "mode": "video_generation",
+        "source": "https://6l0ket291i.apifox.cn/424653897e0",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "zexapi/veo_3_1-fast-fl": {
+        "litellm_provider": "zexapi",
+        "mode": "video_generation",
+        "source": "https://6l0ket291i.apifox.cn/424653897e0",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "zexapi/veo_3_1-fast-hd": {
+        "litellm_provider": "zexapi",
+        "mode": "video_generation",
+        "source": "https://6l0ket291i.apifox.cn/424653897e0",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "zexapi/veo_3_1-fast-fl-hd": {
+        "litellm_provider": "zexapi",
+        "mode": "video_generation",
+        "source": "https://6l0ket291i.apifox.cn/424653897e0",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "zexapi/veo_3_1-fast-4K": {
+        "litellm_provider": "zexapi",
+        "mode": "video_generation",
+        "source": "https://6l0ket291i.apifox.cn/424653897e0",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "zexapi/veo_3_1-fast-4K-fl": {
+        "litellm_provider": "zexapi",
+        "mode": "video_generation",
+        "source": "https://6l0ket291i.apifox.cn/424653897e0",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "zexapi/veo_3_1-lite": {
+        "litellm_provider": "zexapi",
+        "mode": "video_generation",
+        "source": "https://6l0ket291i.apifox.cn/424653897e0",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "zexapi/veo_3_1-lite-fl": {
+        "litellm_provider": "zexapi",
+        "mode": "video_generation",
+        "source": "https://6l0ket291i.apifox.cn/424653897e0",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "zexapi/veo_3_1-lite-hd": {
+        "litellm_provider": "zexapi",
+        "mode": "video_generation",
+        "source": "https://6l0ket291i.apifox.cn/424653897e0",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "zexapi/veo_3_1-lite-hd-fl": {
+        "litellm_provider": "zexapi",
+        "mode": "video_generation",
+        "source": "https://6l0ket291i.apifox.cn/424653897e0",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "zexapi/veo_3_1-lite-4K": {
+        "litellm_provider": "zexapi",
+        "mode": "video_generation",
+        "source": "https://6l0ket291i.apifox.cn/424653897e0",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "zexapi/veo_3_1-lite-4K-fl": {
+        "litellm_provider": "zexapi",
+        "mode": "video_generation",
+        "source": "https://6l0ket291i.apifox.cn/424653897e0",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
     "tts-1": {
         "input_cost_per_character": 1.5e-05,
         "litellm_provider": "openai",

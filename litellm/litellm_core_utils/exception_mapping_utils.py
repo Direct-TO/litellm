@@ -8,6 +8,7 @@ import httpx
 import litellm
 from litellm._logging import _ENABLE_SECRET_REDACTION, _redact_string, verbose_logger
 from litellm.litellm_core_utils.secret_redaction import redact_string
+from litellm.llms.base_llm.submission_utils import copy_submission_metadata
 from litellm.types.utils import LlmProviders
 
 from ..exceptions import (
@@ -2652,6 +2653,7 @@ def exception_type(
                     request=httpx.Request(method="POST", url="https://api.openai.com/v1/"),  # stub the request
                 )
     except Exception as e:
+        e = copy_submission_metadata(original_exception, e)
         # LOGGING
         exception_logging(
             logger_fn=None,

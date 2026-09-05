@@ -3313,6 +3313,26 @@ def get_optional_params_image_gen(
 
     if provider_config is not None:
         supported_params = provider_config.get_supported_openai_params(model=model or "")
+        # Some image parameters (for example ``image_url`` and
+        # ``aspect_ratio``) are intentionally supplied through ``**kwargs``
+        # because they are not part of the OpenAI-compatible function
+        # signature. If a provider explicitly declares one of those fields,
+        # it still needs to go through that provider's mapper instead of being
+        # silently discarded by ``_get_non_default_params``.
+        for supported_param in supported_params:
+            if (
+                supported_param in passed_params
+                and passed_params[supported_param] is not None
+                and _should_drop_param(
+                    k=supported_param,
+                    additional_drop_params=additional_drop_params,
+                )
+                is False
+            ):
+                non_default_params.setdefault(
+                    supported_param,
+                    passed_params[supported_param],
+                )
         _check_valid_arg(supported_params=supported_params)
         optional_params = provider_config.map_openai_params(
             non_default_params=non_default_params,
@@ -9043,9 +9063,11 @@ class ProviderConfigManager:
 
             return ToAPISImageGenerationConfig()
         elif LlmProviders.ZEXAPI == provider:
-            from litellm.llms.zexapi.image_generation.transformation import ZexAPIImageGenerationConfig
+            from litellm.llms.zexapi.image_generation.transformation import (
+                get_zexapi_image_generation_config,
+            )
 
-            return ZexAPIImageGenerationConfig()
+            return get_zexapi_image_generation_config(model)
         return None
 
     @staticmethod
@@ -9202,9 +9224,11 @@ class ProviderConfigManager:
 
             return get_openrouter_image_edit_config(model)
         elif LlmProviders.ZEXAPI == provider:
-            from litellm.llms.zexapi.image_edit.transformation import ZexAPIImageEditConfig
+            from litellm.llms.zexapi.image_edit.transformation import (
+                get_zexapi_image_edit_config,
+            )
 
-            return ZexAPIImageEditConfig()
+            return get_zexapi_image_edit_config(model)
         return None
 
     @staticmethod
