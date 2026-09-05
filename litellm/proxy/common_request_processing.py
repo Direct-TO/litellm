@@ -72,6 +72,20 @@ from litellm.types.router import RouterRateLimitError
 
 _LateResponseT = TypeVar("_LateResponseT", bound=Response)
 _LlmCallT = TypeVar("_LlmCallT")
+_MODEL_REQUIRED_ROUTE_TYPES: Final = frozenset({"acompletion", "atext_completion", "aimage_edit", "avideo_generation"})
+
+
+def require_resolved_model(model: object) -> str:
+    if isinstance(model, str) and model.strip():
+        return model
+    raise ProxyException(
+        message="Missing required parameter: 'model'",
+        type="invalid_request_error",
+        param="model",
+        code=status.HTTP_400_BAD_REQUEST,
+        openai_code="missing_required_parameter",
+    )
+
 
 ProxyRouteType: TypeAlias = Literal[
     "acompletion",
@@ -1797,6 +1811,9 @@ class ProxyBaseLLMRequestProcessing:
             or model  # for azure deployments
             or self.data.get("model", None)  # default passed in http request
         )
+        resolved_model: Final = self.data["model"]
+        if route_type in _MODEL_REQUIRED_ROUTE_TYPES:
+            self.data["model"] = require_resolved_model(resolved_model)
 
         # override with user settings, these are params passed via cli
         if user_temperature:

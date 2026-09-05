@@ -15,7 +15,7 @@ from litellm.litellm_core_utils.prompt_templates.common_utils import (
 )
 from litellm.proxy._types import *
 from litellm.proxy.auth.user_api_key_auth import UserAPIKeyAuth, user_api_key_auth
-from litellm.proxy.common_request_processing import ProxyBaseLLMRequestProcessing
+from litellm.proxy.common_request_processing import ProxyBaseLLMRequestProcessing, require_resolved_model
 from litellm.proxy.route_llm_request import route_request
 from litellm.types.llms.openai import ChatCompletionUserMessage
 
@@ -106,6 +106,7 @@ async def image_generation(
         )
         if user_model:
             data["model"] = user_model
+        data["model"] = require_resolved_model(data["model"])
 
         ### MODEL ALIAS MAPPING ###
         # check if model name in model alias map
@@ -190,6 +191,8 @@ async def image_generation(
         )
         verbose_proxy_logger.error("litellm.proxy.proxy_server.image_generation(): Exception occured - %s", e)
         verbose_proxy_logger.debug(traceback.format_exc())
+        if isinstance(e, ProxyException):
+            raise
         if isinstance(e, HTTPException):
             raise ProxyException(
                 message=getattr(e, "message", str(e)),

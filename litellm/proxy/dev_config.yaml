@@ -203,9 +203,11 @@ model_list:
       model: deepseek/deepseek-chat
       api_key: os.environ/DEEPSEEK_API_KEY
 
-  # ---------- Media services ----------
-  # Add a supplier by repeating the service model_name with its own deployment policy.
-  - model_name: image-generation
+  # ---------- Media models ----------
+  # Public model_name identifies the model. Provider names stay internal.
+  # Same model_name may have multiple provider deployments for one public semantic model.
+  # Router preflight keeps endpoint- and parameter-incompatible deployments out of each request.
+  - model_name: gpt-image-2
     litellm_params:
       model: zexapi/image2
       api_key: os.environ/ZEXAPI_API_KEY
@@ -213,7 +215,10 @@ model_list:
     model_info:
       allowed_fails: 2
       cooldown_time: 60
-      allowed_fails_policy:
+      supported_endpoints:
+        - /v1/images/generations
+        - /v1/images/edits
+      allowed_fails_policy: &media_allowed_fails_policy
         AuthenticationErrorAllowedFails: 0
         TimeoutErrorAllowedFails: 2
         RateLimitErrorAllowedFails: 2
@@ -221,7 +226,19 @@ model_list:
         ServiceUnavailableErrorAllowedFails: 2
         BadGatewayErrorAllowedFails: 2
         NotFoundErrorAllowedFails: 1
-  - model_name: image-generation-only-toapis
+  - model_name: gpt-image-2
+    litellm_params:
+      model: zexapi/gpt-image2
+      api_key: os.environ/ZEXAPI_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/images/generations
+        - /v1/images/edits
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: gpt-image-2
     litellm_params:
       model: toapis/gpt-image-2
       api_key: os.environ/TOAPIS_API_KEY
@@ -229,15 +246,186 @@ model_list:
     model_info:
       allowed_fails: 2
       cooldown_time: 60
-      allowed_fails_policy:
-        AuthenticationErrorAllowedFails: 0
-        TimeoutErrorAllowedFails: 2
-        RateLimitErrorAllowedFails: 2
-        InternalServerErrorAllowedFails: 2
-        ServiceUnavailableErrorAllowedFails: 2
-        BadGatewayErrorAllowedFails: 2
-        NotFoundErrorAllowedFails: 1
-  - model_name: video-generation
+      supported_endpoints:
+        - /v1/images/generations
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: gemini-2.5-flash-image-preview
+    litellm_params:
+      model: toapis/gemini-2.5-flash-image-preview
+      api_key: os.environ/TOAPIS_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/images/generations
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: gemini-3-pro-image-preview
+    litellm_params:
+      model: toapis/gemini-3-pro-image-preview
+      api_key: os.environ/TOAPIS_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/images/generations
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: gemini-3-pro-image-preview
+    litellm_params:
+      model: zexapi/gemini-3-pro-image-preview
+      api_key: os.environ/ZEXAPI_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/images/generations
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: gemini-3.1-flash-image-preview
+    litellm_params:
+      model: toapis/gemini-3.1-flash-image-preview
+      api_key: os.environ/TOAPIS_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/images/generations
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: gemini-3.1-flash-image-preview
+    litellm_params:
+      model: zexapi/gemini-3.1-flash-image-preview
+      api_key: os.environ/ZEXAPI_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/images/generations
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: gemini-omni-flash
+    litellm_params:
+      model: toapis/gemini-omni-flash
+      api_key: os.environ/TOAPIS_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: gemini-omni-flash-preview-official
+    litellm_params:
+      model: toapis/gemini-omni-flash-preview-official
+      api_key: os.environ/TOAPIS_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: veo3.1-fast
+    litellm_params:
+      model: toapis/veo3.1-fast
+      api_key: os.environ/TOAPIS_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: veo3.1-quality
+    litellm_params:
+      model: toapis/veo3.1-quality
+      api_key: os.environ/TOAPIS_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: veo3.1-lite
+    litellm_params:
+      model: toapis/veo3.1-lite
+      api_key: os.environ/TOAPIS_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: Veo3.1-fast-official
+    litellm_params:
+      model: toapis/Veo3.1-fast-official
+      api_key: os.environ/TOAPIS_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: Veo3.1-quality-official
+    litellm_params:
+      model: toapis/Veo3.1-quality-official
+      api_key: os.environ/TOAPIS_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: Veo3.1-lite-official
+    litellm_params:
+      model: toapis/Veo3.1-lite-official
+      api_key: os.environ/TOAPIS_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: seedance-2
+    litellm_params:
+      model: toapis/seedance-2
+      api_key: os.environ/TOAPIS_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: seedance-2-fast
+    litellm_params:
+      model: toapis/seedance-2-fast
+      api_key: os.environ/TOAPIS_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: seedance-2-mini
+    litellm_params:
+      model: toapis/seedance-2-mini
+      api_key: os.environ/TOAPIS_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: seedance-2-5
     litellm_params:
       model: toapis/seedance-2-5
       api_key: os.environ/TOAPIS_API_KEY
@@ -245,26 +433,363 @@ model_list:
     model_info:
       allowed_fails: 2
       cooldown_time: 60
-      allowed_fails_policy:
-        AuthenticationErrorAllowedFails: 0
-        TimeoutErrorAllowedFails: 2
-        RateLimitErrorAllowedFails: 2
-        InternalServerErrorAllowedFails: 2
-        ServiceUnavailableErrorAllowedFails: 2
-        BadGatewayErrorAllowedFails: 2
-        NotFoundErrorAllowedFails: 1
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: wan3.0-video
+    litellm_params:
+      model: toapis/wan3.0-video
+      api_key: os.environ/TOAPIS_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: happyhorse-1.1
+    litellm_params:
+      model: toapis/happyhorse-1.1
+      api_key: os.environ/TOAPIS_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: MiniMax-H3
+    litellm_params:
+      model: toapis/MiniMax-H3
+      api_key: os.environ/TOAPIS_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: kling-v2-6
+    litellm_params:
+      model: toapis/kling-v2-6
+      api_key: os.environ/TOAPIS_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: kling-v3
+    litellm_params:
+      model: toapis/kling-v3
+      api_key: os.environ/TOAPIS_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: kling-3.0-turbo
+    litellm_params:
+      model: toapis/kling-3.0-turbo
+      api_key: os.environ/TOAPIS_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: kling-v3-omni
+    litellm_params:
+      model: toapis/kling-v3-omni
+      api_key: os.environ/TOAPIS_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: kling-video-o1
+    litellm_params:
+      model: toapis/kling-video-o1
+      api_key: os.environ/TOAPIS_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: grok-video-1.0
+    litellm_params:
+      model: toapis/grok-video-1.0
+      api_key: os.environ/TOAPIS_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: grok-video-1.5
+    litellm_params:
+      model: toapis/grok-video-1.5
+      api_key: os.environ/TOAPIS_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: veo3.1-fast
+    litellm_params:
+      model: zexapi/veo_3_1-fast
+      api_key: os.environ/ZEXAPI_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: veo3.1-quality
+    litellm_params:
+      model: zexapi/veo_3_1
+      api_key: os.environ/ZEXAPI_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: veo3.1-lite
+    litellm_params:
+      model: zexapi/veo_3_1-lite
+      api_key: os.environ/ZEXAPI_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: omni_flash-10s
+    litellm_params:
+      model: zexapi/omni_flash-10s
+      api_key: os.environ/ZEXAPI_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: omni_flash-10s-fl
+    litellm_params:
+      model: zexapi/omni_flash-10s-fl
+      api_key: os.environ/ZEXAPI_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: veo_3_1-fl
+    litellm_params:
+      model: zexapi/veo_3_1-fl
+      api_key: os.environ/ZEXAPI_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: veo_3_1-hd
+    litellm_params:
+      model: zexapi/veo_3_1-hd
+      api_key: os.environ/ZEXAPI_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: veo_3_1-hd-fl
+    litellm_params:
+      model: zexapi/veo_3_1-hd-fl
+      api_key: os.environ/ZEXAPI_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: veo_3_1-4K
+    litellm_params:
+      model: zexapi/veo_3_1-4K
+      api_key: os.environ/ZEXAPI_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: veo_3_1-4K-fl
+    litellm_params:
+      model: zexapi/veo_3_1-4K-fl
+      api_key: os.environ/ZEXAPI_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: veo_3_1-fast-fl
+    litellm_params:
+      model: zexapi/veo_3_1-fast-fl
+      api_key: os.environ/ZEXAPI_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: veo_3_1-fast-hd
+    litellm_params:
+      model: zexapi/veo_3_1-fast-hd
+      api_key: os.environ/ZEXAPI_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: veo_3_1-fast-fl-hd
+    litellm_params:
+      model: zexapi/veo_3_1-fast-fl-hd
+      api_key: os.environ/ZEXAPI_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: veo_3_1-fast-4K
+    litellm_params:
+      model: zexapi/veo_3_1-fast-4K
+      api_key: os.environ/ZEXAPI_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: veo_3_1-fast-4K-fl
+    litellm_params:
+      model: zexapi/veo_3_1-fast-4K-fl
+      api_key: os.environ/ZEXAPI_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: veo_3_1-lite-fl
+    litellm_params:
+      model: zexapi/veo_3_1-lite-fl
+      api_key: os.environ/ZEXAPI_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: veo_3_1-lite-hd
+    litellm_params:
+      model: zexapi/veo_3_1-lite-hd
+      api_key: os.environ/ZEXAPI_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: veo_3_1-lite-hd-fl
+    litellm_params:
+      model: zexapi/veo_3_1-lite-hd-fl
+      api_key: os.environ/ZEXAPI_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: veo_3_1-lite-4K
+    litellm_params:
+      model: zexapi/veo_3_1-lite-4K
+      api_key: os.environ/ZEXAPI_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: veo_3_1-lite-4K-fl
+    litellm_params:
+      model: zexapi/veo_3_1-lite-4K-fl
+      api_key: os.environ/ZEXAPI_API_KEY
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
-  completion_model: deepseek-chat
-  image_generation_model: image-generation
-  video_generation_model: video-generation
   model_list_generation_only: true
   store_prompts_in_spend_logs: true
   # Opt-in: let CheckBatchCost track cost for unmanaged batches created with a raw
   # gs:// (Vertex) or s3:// (Bedrock) input_file_id. Requires a matching deployment
   # configured for the batched model. Defaults to false.
   # track_unmanaged_batch_cost: true
+
+router_settings:
+  routing_strategy: simple-shuffle
+  enable_weighted_failover: true
+  weighted_failover_policy:
+    call_types:
+      - aimage_generation
+      - avideo_generation
+    status_codes:
+      - 403
+      - 429
+      - 503
+    submission_outcomes:
+      - rejected
+    failure_scope: provider
 
 sandbox_tools:
   - sandbox_tool_name: e2b_sandbox

@@ -10,8 +10,20 @@ from fastapi.testclient import TestClient
 from starlette.requests import Request
 from starlette.responses import Response
 
-from litellm.proxy._types import UserAPIKeyAuth
+from litellm.proxy._types import ProxyException, UserAPIKeyAuth
+from litellm.proxy.common_request_processing import require_resolved_model
 from litellm.proxy.image_endpoints import endpoints
+
+
+def test_generation_model_is_required_when_no_server_default_is_configured():
+    with pytest.raises(ProxyException) as exc_info:
+        require_resolved_model(None)
+
+    error = exc_info.value
+    assert getattr(error, "code", None) == "400"
+    assert getattr(error, "param", None) == "model"
+    assert getattr(error, "openai_code", None) == "missing_required_parameter"
+    assert require_resolved_model("gpt-image-2") == "gpt-image-2"
 
 
 @pytest.mark.parametrize("image_field", ["image", "image[]"])
@@ -38,7 +50,7 @@ def test_image_edit_preserves_repeated_multipart_images_and_mask(monkeypatch, im
     with TestClient(app) as client:
         response = client.post(
             "/v1/images/edits",
-            data={"prompt": "keep the subject", "model": "image-generation"},
+            data={"prompt": "keep the subject", "model": "gpt-image-2"},
             files=[
                 (image_field, ("reference-1.png", b"first", "image/png")),
                 (image_field, ("reference-2.png", b"second", "image/png")),
@@ -49,7 +61,7 @@ def test_image_edit_preserves_repeated_multipart_images_and_mask(monkeypatch, im
     assert response.status_code == 200
     assert response.json() == {"data": [{"url": "https://files.example/result.png"}]}
     assert captured_data["prompt"] == "keep the subject"
-    assert captured_data["model"] == "image-generation"
+    assert captured_data["model"] == "gpt-image-2"
     assert [image.read() for image in captured_data["image"]] == [b"first", b"second"]
     assert [mask.read() for mask in captured_data["mask"]] == [b"mask"]
 
@@ -115,7 +127,7 @@ async def test_image_generation_prompt_rerouting(monkeypatch):
         "path": "/v1/images/generations",
         "headers": [],
     }
-    body = orjson.dumps({"prompt": "original prompt"})
+    body = orjson.dumps({"model": "gpt-image-2", "prompt": "original prompt"})
 
     async def receive():
         return {"type": "http.request", "body": body, "more_body": False}
@@ -131,18 +143,14 @@ async def test_image_generation_prompt_rerouting(monkeypatch):
     monkeypatch.setattr("litellm.proxy.proxy_server.general_settings", {})
     monkeypatch.setattr("litellm.proxy.proxy_server.llm_router", None)
     monkeypatch.setattr("litellm.proxy.proxy_server.proxy_config", {})
-    monkeypatch.setattr(
-        "litellm.proxy.proxy_server.proxy_logging_obj", fake_proxy_logger
-    )
+    monkeypatch.setattr("litellm.proxy.proxy_server.proxy_logging_obj", fake_proxy_logger)
     monkeypatch.setattr("litellm.proxy.proxy_server.user_model", None)
     monkeypatch.setattr("litellm.proxy.proxy_server.version", "test-version")
     monkeypatch.setattr(
         "litellm.proxy.common_request_processing.ProxyBaseLLMRequestProcessing.get_custom_headers",
         classmethod(lambda *args, **kwargs: {}),
     )
-    monkeypatch.setattr(
-        "litellm.proxy.image_endpoints.endpoints.route_request", fake_route_request
-    )
+    monkeypatch.setattr("litellm.proxy.image_endpoints.endpoints.route_request", fake_route_request)
 
     result = await endpoints.image_generation(
         request=request,
