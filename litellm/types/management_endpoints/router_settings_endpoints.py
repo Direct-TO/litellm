@@ -149,6 +149,25 @@ ROUTER_SETTINGS_FIELDS: Final[list[RouterSettingsField]] = [
         ui_field_name="Max Fallbacks",
     ),
     RouterSettingsField(
+        field_name="enable_weighted_failover",
+        field_type="Boolean",
+        field_value=None,
+        field_description="Retry a failed request on another deployment in the same model group",
+        field_default=False,
+        ui_field_name="Same-model Failover",
+    ),
+    RouterSettingsField(
+        field_name="weighted_failover_policy",
+        field_type="Dictionary",
+        field_value=None,
+        field_description=(
+            "Optional AND-combined filters for same-model failover: call_types, status_codes, and submission_outcomes"
+            "; failure_scope can exclude one deployment or the entire failed provider"
+        ),
+        field_default=None,
+        ui_field_name="Same-model Failover Policy",
+    ),
+    RouterSettingsField(
         field_name="fallbacks",
         field_type="List",
         field_value=None,

@@ -137,6 +137,53 @@ describe("RouterSettings", () => {
     );
   });
 
+  it("should parse weighted failover policy JSON before saving", async () => {
+    const user = userEvent.setup();
+    vi.mocked(getCallbacksCall).mockResolvedValue({
+      router_settings: {
+        routing_strategy: "simple-shuffle",
+        enable_weighted_failover: true,
+        weighted_failover_policy: {
+          call_types: ["aimage_generation", "avideo_generation"],
+          status_codes: [403, 429, 503],
+          submission_outcomes: ["rejected"],
+          failure_scope: "provider",
+        },
+      },
+    });
+    renderWithProviders(<RouterSettings {...defaultProps} />);
+
+    await findStrategySelect();
+    const policyInput = await screen.findByRole("textbox", { name: /weighted_failover_policy/i });
+    fireEvent.change(policyInput, {
+      target: {
+        value: JSON.stringify({
+          call_types: ["avideo_generation"],
+          status_codes: [503],
+          submission_outcomes: ["rejected"],
+          failure_scope: "provider",
+        }),
+      },
+    });
+    await user.click(screen.getByRole("button", { name: /save changes/i }));
+
+    await waitFor(() =>
+      expect(setCallbacksCall).toHaveBeenCalledWith(
+        "test-token",
+        expect.objectContaining({
+          router_settings: expect.objectContaining({
+            weighted_failover_policy: {
+              call_types: ["avideo_generation"],
+              status_codes: [503],
+              submission_outcomes: ["rejected"],
+              failure_scope: "provider",
+            },
+          }),
+        }),
+      ),
+    );
+  });
+
   it("should show a success notification after saving", async () => {
     const user = userEvent.setup();
     renderWithProviders(<RouterSettings {...defaultProps} />);
