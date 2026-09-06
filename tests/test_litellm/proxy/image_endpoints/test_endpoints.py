@@ -1,5 +1,6 @@
 import asyncio
 import copy
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
 
@@ -10,9 +11,11 @@ from fastapi.testclient import TestClient
 from starlette.requests import Request
 from starlette.responses import Response
 
+import litellm
 from litellm.proxy._types import ProxyException, UserAPIKeyAuth
 from litellm.proxy.common_request_processing import require_resolved_model
 from litellm.proxy.image_endpoints import endpoints
+from litellm.proxy.spend_tracking.spend_tracking_utils import get_logging_payload
 
 
 def test_generation_model_is_required_when_no_server_default_is_configured():
@@ -165,3 +168,58 @@ async def test_image_generation_prompt_rerouting(monkeypatch):
     assert captured_route_request_data["prompt"] == "sanitized prompt"
     assert "messages" not in captured_route_request_data
     assert response.headers.get("x-callback-test") == "value"
+
+
+@pytest.mark.asyncio
+async def test_image_preflight_failures_have_distinct_stable_spend_log_ids(monkeypatch):
+    payloads = []
+    routed_ids = []
+
+    async def passthrough(**kwargs):
+        return kwargs["data"]
+
+    async def reject_preflight(*, data, **kwargs):
+        routed_ids.append(data["litellm_call_id"])
+        raise litellm.BadRequestError(
+            message="no deployment supporting image generation parameter(s): resolution",
+            model=data["model"],
+            llm_provider="",
+        )
+
+    async def record_failure(*, request_data, original_exception, **kwargs):
+        assert isinstance(original_exception, litellm.BadRequestError)
+        request_data["litellm_params"] = {"metadata": {"status": "failure"}}
+        now = datetime.now(timezone.utc)
+        first = get_logging_payload(request_data, {}, now, now)
+        repeated = get_logging_payload(request_data, {}, now, now)
+        assert first["request_id"] == repeated["request_id"]
+        assert orjson.loads(first["metadata"])["status"] == "failure"
+        payloads.append(first)
+
+    monkeypatch.setattr("litellm.proxy.proxy_server.add_litellm_data_to_request", passthrough)
+    monkeypatch.setattr("litellm.proxy.proxy_server.general_settings", {})
+    monkeypatch.setattr("litellm.proxy.proxy_server.llm_router", None)
+    monkeypatch.setattr("litellm.proxy.proxy_server.proxy_config", {})
+    monkeypatch.setattr("litellm.proxy.proxy_server.user_model", None)
+    monkeypatch.setattr("litellm.proxy.proxy_server.proxy_logging_obj", SimpleNamespace(
+        pre_call_hook=passthrough, post_call_failure_hook=record_failure,
+    ))
+    monkeypatch.setattr(endpoints, "route_request", reject_preflight)
+
+    for _ in range(2):
+        async def receive():
+            return {"type": "http.request", "more_body": False, "body": orjson.dumps({
+                "model": "gemini-2.5-flash-image-preview", "prompt": "test",
+                "resolution": "2K", "litellm_call_id": "client-reused-id",
+            })}
+
+        request = Request({"type": "http", "method": "POST",
+                           "path": "/v1/images/generations", "headers": []}, receive)
+        with pytest.raises(ProxyException) as exc_info:
+            await endpoints.image_generation(request, Response(), UserAPIKeyAuth())
+        assert str(exc_info.value.code) == "400"
+
+    assert len(payloads) == 2
+    assert [payload["request_id"] for payload in payloads] == routed_ids
+    assert len(set(routed_ids)) == 2
+    assert all(call_id not in ("None", "", "client-reused-id") for call_id in routed_ids)

@@ -1,6 +1,7 @@
 import asyncio
 import io
 import traceback
+import uuid
 from collections.abc import Sequence
 from typing import Final
 
@@ -84,6 +85,8 @@ async def image_generation(
         # Use orjson to parse JSON data, orjson speeds up requests significantly
         body: Final = await request.body()
         data = orjson.loads(body)
+        # Router preflight can fail before core logging initializes a call ID.
+        data["litellm_call_id"] = str(uuid.uuid4())
 
         # Include original request and headers in the data
         data = await add_litellm_data_to_request(

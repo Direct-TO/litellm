@@ -1,6 +1,7 @@
 import os
 import re
 import secrets
+import uuid
 from datetime import datetime, timezone
 from datetime import datetime as dt
 from typing import Any, Final, Literal, cast
@@ -172,17 +173,22 @@ def _get_spend_logs_metadata(
 BATCH_COST_REQUEST_ID_SUFFIX: Final = "_batch_cost"
 
 
-def get_spend_logs_id(call_type: str, response_obj: dict, kwargs: dict) -> str | None:
+def get_spend_logs_id(call_type: str, response_obj: dict, kwargs: dict) -> str:
     standard_logging_payload = kwargs.get("standard_logging_object")
     candidate_ids: Final = (
         response_obj.get("id"),
         standard_logging_payload.get("id") if isinstance(standard_logging_payload, dict) else None,
         kwargs.get("litellm_call_id"),
     )
-    resolved_id: Final = next(
-        (candidate for candidate in candidate_ids if isinstance(candidate, str) and candidate), None
+    resolved_id = next(
+        (candidate for candidate in candidate_ids if isinstance(candidate, str) and candidate and candidate != "None"),
+        None,
     )
-    if resolved_id is not None and call_type == CallTypes.aretrieve_batch.value:
+    if resolved_id is None:
+        # Persist on the request so repeated failure callbacks keep the same ID.
+        resolved_id = str(uuid.uuid4())
+        kwargs["litellm_call_id"] = resolved_id
+    if call_type == CallTypes.aretrieve_batch.value:
         return f"{resolved_id}{BATCH_COST_REQUEST_ID_SUFFIX}"
     return resolved_id
 

@@ -2913,6 +2913,26 @@ def test_get_logging_payload_litellm_call_id_when_response_has_no_id():
     assert payload["request_id"] == trace_call_id
 
 
+@pytest.mark.parametrize("missing_id", [None, "", "None"])
+def test_missing_spend_log_ids_are_unique_and_stable(missing_id):
+    now = datetime.datetime.now(timezone.utc)
+    ids = []
+    for _ in range(2):
+        kwargs = {
+            "model": "test-image-model",
+            "litellm_call_id": missing_id,
+            "litellm_params": {"metadata": {"status": "failure"}},
+        }
+        response = {"id": missing_id}
+        first = get_logging_payload(kwargs, response, now, now)
+        repeated = get_logging_payload(kwargs, response, now, now)
+        assert first["request_id"] == repeated["request_id"] == kwargs["litellm_call_id"]
+        assert first["request_id"] not in (None, "", "None")
+        assert json.loads(first["metadata"])["litellm_call_id"] == first["request_id"]
+        ids.append(first["request_id"])
+    assert ids[0] != ids[1]
+
+
 def test_get_logging_payload_cache_hit_keeps_raw_litellm_call_id():
     """On a cache hit request_id is suffixed to stay unique, but the metadata
     litellm_call_id stays the raw trace id so the row still points at its trace.
