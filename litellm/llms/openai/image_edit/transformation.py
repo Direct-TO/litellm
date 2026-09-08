@@ -32,7 +32,7 @@ class OpenAIImageEditConfig(BaseImageEditConfig):
     Used for models like gpt-image-1 that support multiple images.
     """
 
-    def get_supported_openai_params(self, model: str) -> list:
+    def get_supported_openai_params(self, model: str) -> list[str]:
         """
         All OpenAI Image Edits params are supported
         """

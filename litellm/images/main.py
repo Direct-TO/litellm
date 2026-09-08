@@ -35,6 +35,8 @@ from openai.types.audio.transcription_create_params import FileTypes
 from litellm.llms.black_forest_labs.image_edit.handler import bfl_image_edit
 from litellm.llms.black_forest_labs.image_generation.handler import bfl_image_generation
 from litellm.llms.toapis.image_generation.handler import toapis_image_generation
+from litellm.llms.zexapi.image_generation.async_handler import zexapi_async_images
+from litellm.llms.zexapi.image_generation.async_transformation import async_image_params, is_zexapi_async_image_model
 from litellm.main import (
     azure_chat_completions,
     base_llm_aiohttp_handler,
@@ -263,6 +265,25 @@ def image_generation(
                 provider=LlmProviders(custom_llm_provider),
             )
 
+        if custom_llm_provider == LlmProviders.ZEXAPI and is_zexapi_async_image_model(model):
+            assert model is not None
+            # Validate editing semantics before generic drop_params can discard them.
+            explicitly_dropped = kwargs.get("additional_drop_params")
+            async_image_params(
+                model,
+                {
+                    key: value
+                    for key, value in {
+                        **non_default_params,
+                        "n": n,
+                        "quality": quality,
+                        "response_format": response_format,
+                        "size": size,
+                    }.items()
+                    if not isinstance(explicitly_dropped, list) or key not in explicitly_dropped
+                },
+            )
+
         optional_params: Final = get_optional_params_image_gen(
             model=base_model or model,
             n=n,
@@ -382,6 +403,22 @@ def image_generation(
                 raise ValueError("Model needs to be set for toapis")
             litellm_params_dict["api_base"] = api_base or litellm.api_base
             return toapis_image_generation.image_generation(
+                model=model,
+                prompt=prompt,
+                optional_params=optional_params,
+                litellm_params=litellm_params_dict,
+                logging_obj=litellm_logging_obj,
+                timeout=timeout,
+                api_key=api_key or dynamic_api_key,
+                extra_headers=extra_headers,
+                extra_body=kwargs.get("extra_body"),
+                client=client,
+                aimg_generation=aimg_generation,
+            )
+        elif custom_llm_provider == litellm.LlmProviders.ZEXAPI and is_zexapi_async_image_model(model):
+            assert model is not None
+            litellm_params_dict["api_base"] = api_base or litellm.api_base
+            return zexapi_async_images.image_generation(
                 model=model,
                 prompt=prompt,
                 optional_params=optional_params,
@@ -955,6 +992,22 @@ def image_edit(
                 extra_headers=extra_headers,
                 client=kwargs.get("client"),
                 aimage_edit=_is_async,
+            )
+        if custom_llm_provider == "zexapi" and is_zexapi_async_image_model(model):
+            return zexapi_async_images.image_generation(
+                model=model,
+                prompt=prompt,
+                optional_params=image_edit_request_params,
+                litellm_params=litellm_params,
+                logging_obj=litellm_logging_obj,
+                timeout=timeout,
+                api_key=kwargs.get("api_key"),
+                extra_headers=extra_headers,
+                extra_body=extra_body,
+                client=kwargs.get("client"),
+                aimg_generation=_is_async,
+                image=images,
+                is_edit=True,
             )
         # Call the handler with _is_async flag instead of directly calling the async handler
         return base_llm_http_handler.image_edit_handler(

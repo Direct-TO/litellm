@@ -223,6 +223,48 @@ async def test_image_edit_router_selects_high_resolution_deployment(monkeypatch)
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("drop_params", [False, True])
+async def test_image_edit_router_uses_tier_to_exclude_1k_deployment(monkeypatch, drop_params):
+    captured = []
+
+    async def fake_image_edit(**kwargs):
+        captured.append(kwargs)
+        return litellm.ImageResponse(data=[])
+
+    monkeypatch.setattr(litellm, "aimage_edit", fake_image_edit)
+    router = Router(model_list=_image_model_list(include_zexapi_highres=True), num_retries=0)
+    await router.aimage_edit(
+        model="gpt-image-2",
+        image=b"image",
+        prompt="edit",
+        aspect_ratio="16:9",
+        resolution="2K",
+        drop_params=drop_params,
+    )
+    assert len(captured) == 1
+    assert captured[0]["model"] == "zexapi/gpt-image2"
+    assert captured[0]["aspect_ratio"] == "16:9"
+    assert captured[0]["resolution"] == "2K"
+
+
+@pytest.mark.asyncio
+async def test_image_edit_router_rejects_2k_without_a_compatible_deployment(monkeypatch):
+    called = []
+
+    async def fake_image_edit(**kwargs):
+        called.append(kwargs)
+        return litellm.ImageResponse(data=[])
+
+    monkeypatch.setattr(litellm, "aimage_edit", fake_image_edit)
+    router = Router(model_list=_image_model_list(), num_retries=0)
+    with pytest.raises(litellm.BadRequestError, match="image edit parameter"):
+        await router.aimage_edit(
+            model="gpt-image-2", image=b"image", prompt="edit", aspect_ratio="16:9", resolution="2K", drop_params=True
+        )
+    assert called == []
+
+
+@pytest.mark.asyncio
 async def test_image_generation_router_rejects_deployment_that_would_drop_nested_image_config(monkeypatch):
     captured: dict[str, object] = {}
 

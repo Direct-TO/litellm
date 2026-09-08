@@ -39141,6 +39141,54 @@
             "video"
         ]
     },
+    "zexapi/gpt-image-2": {
+        "litellm_provider": "zexapi",
+        "mode": "image_generation",
+        "source": "https://6l0ket291i.apifox.cn/447634846e0",
+        "supported_endpoints": [
+            "/v1/images/generations",
+            "/v1/images/edits"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "image"
+        ]
+    },
+    "zexapi/gpt-image-2-2K": {
+        "litellm_provider": "zexapi",
+        "mode": "image_generation",
+        "source": "https://6l0ket291i.apifox.cn/447634846e0",
+        "supported_endpoints": [
+            "/v1/images/generations",
+            "/v1/images/edits"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "image"
+        ]
+    },
+    "zexapi/gpt-image-2-4K": {
+        "litellm_provider": "zexapi",
+        "mode": "image_generation",
+        "source": "https://6l0ket291i.apifox.cn/447634846e0",
+        "supported_endpoints": [
+            "/v1/images/generations",
+            "/v1/images/edits"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "image"
+        ]
+    },
     "zexapi/image2": {
         "litellm_provider": "zexapi",
         "mode": "image_generation",

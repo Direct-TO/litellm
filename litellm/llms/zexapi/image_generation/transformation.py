@@ -119,6 +119,10 @@ _OBJECT_LIST_ADAPTER: Final = TypeAdapter(list[dict[str, object]])
 
 
 def get_zexapi_image_generation_config(model: str) -> BaseImageGenerationConfig:
+    from .async_transformation import ZexAPIAsyncImageGenerationConfig, is_zexapi_async_image_model
+
+    if is_zexapi_async_image_model(model):
+        return ZexAPIAsyncImageGenerationConfig()
     if model in _BANANA_MODELS:
         return ZexAPIBananaImageGenerationConfig()
     return ZexAPIImageGenerationConfig()
@@ -228,6 +232,94 @@ def _normalize_banana_reference_parts(value: object, *, model: str) -> list[dict
     return parts
 
 
+def resolve_zexapi_image_size(model: str, params: Mapping[str, object]) -> str:
+    """Resolve generation/edit dimensions using the provider's shared pixel table."""
+    supported_resolutions: Final = _IMAGE_MODEL_RESOLUTIONS.get(model)
+    if supported_resolutions is None:
+        raise UnsupportedParamsError(
+            message=f"ZexAPI image parameters do not support model={model!r}",
+            model=model,
+            llm_provider="zexapi",
+        )
+    raw_image_config: Final = params.get("imageConfig")
+    if raw_image_config is not None and not isinstance(raw_image_config, Mapping):
+        raise UnsupportedParamsError(
+            message="imageConfig must be an object",
+            model=model,
+            llm_provider="zexapi",
+        )
+    image_config: Final[Mapping[str, object]] = (
+        cast(Mapping[str, object], raw_image_config) if isinstance(raw_image_config, Mapping) else MappingProxyType({})
+    )
+    unsupported_image_config_fields: Final = frozenset(image_config).difference(_IMAGE_CONFIG_FIELDS)
+    if unsupported_image_config_fields:
+        raise UnsupportedParamsError(
+            message=(
+                f"ZexAPI model={model!r} does not support imageConfig field(s): "
+                f"{', '.join(sorted(unsupported_image_config_fields))}"
+            ),
+            model=model,
+            llm_provider="zexapi",
+        )
+    raw_ratio_candidates: Final = (
+        ("size", params.get("size")),
+        ("aspect_ratio", params.get("aspect_ratio")),
+        ("imageConfig.aspectRatio", image_config.get("aspectRatio")),
+    )
+    canonical_ratios: Final = tuple(
+        _canonical_ratio(
+            value,
+            _IMAGE2_RATIOS,
+            field=field,
+            model=model,
+            contract_name=f"ZexAPI model={model!r}",
+            size_to_ratio=_ALL_IMAGE_SIZE_TO_RATIO,
+        )
+        for field, value in raw_ratio_candidates
+        if value is not None
+    )
+    if len(frozenset(canonical_ratios)) > 1:
+        raise UnsupportedParamsError(
+            message="size, aspect_ratio, and imageConfig.aspectRatio must describe the same aspect ratio",
+            model=model,
+            llm_provider="zexapi",
+        )
+    ratio: Final = canonical_ratios[0] if canonical_ratios else "1:1"
+
+    raw_resolution_candidates: Final = (
+        ("resolution", params.get("resolution")),
+        ("imageConfig.imageSize", image_config.get("imageSize")),
+        ("imageConfig.resolution", image_config.get("resolution")),
+        *(
+            (f"{field} pixel size", _ALL_IMAGE_SIZE_TO_RESOLUTION[value])
+            for field, value in raw_ratio_candidates
+            if isinstance(value, str) and value in _ALL_IMAGE_SIZE_TO_RESOLUTION
+        ),
+    )
+    canonical_resolutions: Final = tuple(
+        _canonical_image_resolution(
+            value,
+            supported_resolutions,
+            field=field,
+            model=model,
+        )
+        for field, value in raw_resolution_candidates
+        if value is not None
+    )
+    if len(frozenset(canonical_resolutions)) > 1:
+        raise UnsupportedParamsError(
+            message=(
+                "resolution, imageConfig.imageSize, imageConfig.resolution, and pixel size "
+                "must describe the same resolution"
+            ),
+            model=model,
+            llm_provider="zexapi",
+        )
+    resolution: Final = canonical_resolutions[0] if canonical_resolutions else "1K"
+    provider_size: Final = _IMAGE_RATIO_TO_SIZE_BY_RESOLUTION[resolution][ratio]
+    return provider_size
+
+
 class ZexAPIImageGenerationConfig(BaseImageGenerationConfig):
     def get_supported_openai_params(
         self, model: str
@@ -268,84 +360,7 @@ class ZexAPIImageGenerationConfig(BaseImageGenerationConfig):
                 model=model,
                 llm_provider="zexapi",
             )
-        raw_image_config: Final = params.get("imageConfig")
-        if raw_image_config is not None and not isinstance(raw_image_config, Mapping):
-            raise UnsupportedParamsError(
-                message="imageConfig must be an object",
-                model=model,
-                llm_provider="zexapi",
-            )
-        image_config: Final[Mapping[str, object]] = (
-            cast(Mapping[str, object], raw_image_config)
-            if isinstance(raw_image_config, Mapping)
-            else MappingProxyType({})
-        )
-        unsupported_image_config_fields: Final = frozenset(image_config).difference(_IMAGE_CONFIG_FIELDS)
-        if unsupported_image_config_fields:
-            raise UnsupportedParamsError(
-                message=(
-                    f"ZexAPI model={model!r} does not support imageConfig field(s): "
-                    f"{', '.join(sorted(unsupported_image_config_fields))}"
-                ),
-                model=model,
-                llm_provider="zexapi",
-            )
-        raw_ratio_candidates: Final = (
-            ("size", params.get("size")),
-            ("aspect_ratio", params.get("aspect_ratio")),
-            ("imageConfig.aspectRatio", image_config.get("aspectRatio")),
-        )
-        canonical_ratios: Final = tuple(
-            _canonical_ratio(
-                value,
-                _IMAGE2_RATIOS,
-                field=field,
-                model=model,
-                contract_name=f"ZexAPI model={model!r}",
-                size_to_ratio=_ALL_IMAGE_SIZE_TO_RATIO,
-            )
-            for field, value in raw_ratio_candidates
-            if value is not None
-        )
-        if len(frozenset(canonical_ratios)) > 1:
-            raise UnsupportedParamsError(
-                message="size, aspect_ratio, and imageConfig.aspectRatio must describe the same aspect ratio",
-                model=model,
-                llm_provider="zexapi",
-            )
-        ratio: Final = canonical_ratios[0] if canonical_ratios else "1:1"
-
-        raw_resolution_candidates: Final = (
-            ("resolution", params.get("resolution")),
-            ("imageConfig.imageSize", image_config.get("imageSize")),
-            ("imageConfig.resolution", image_config.get("resolution")),
-            *(
-                (f"{field} pixel size", _ALL_IMAGE_SIZE_TO_RESOLUTION[value])
-                for field, value in raw_ratio_candidates
-                if isinstance(value, str) and value in _ALL_IMAGE_SIZE_TO_RESOLUTION
-            ),
-        )
-        canonical_resolutions: Final = tuple(
-            _canonical_image_resolution(
-                value,
-                supported_resolutions,
-                field=field,
-                model=model,
-            )
-            for field, value in raw_resolution_candidates
-            if value is not None
-        )
-        if len(frozenset(canonical_resolutions)) > 1:
-            raise UnsupportedParamsError(
-                message=(
-                    "resolution, imageConfig.imageSize, imageConfig.resolution, and pixel size "
-                    "must describe the same resolution"
-                ),
-                model=model,
-                llm_provider="zexapi",
-            )
-        resolution: Final = canonical_resolutions[0] if canonical_resolutions else "1K"
-        provider_size: Final = _IMAGE_RATIO_TO_SIZE_BY_RESOLUTION[resolution][ratio]
+        provider_size: Final = resolve_zexapi_image_size(model=model, params=params)
         return {  # mutable-ok: image parameter mapping contract requires a concrete dict
             "size": provider_size,
             "response_format": "url",

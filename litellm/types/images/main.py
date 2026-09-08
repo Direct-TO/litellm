@@ -19,6 +19,8 @@ class ImageEditOptionalRequestParams(TypedDict, total=False):
     quality: Literal["high", "medium", "low", "standard", "auto"] | None
     response_format: Literal["url", "b64_json"] | None
     size: str | None
+    aspect_ratio: str | None
+    resolution: str | None
     user: str | None
     imageConfig: dict[str, Any] | None
 

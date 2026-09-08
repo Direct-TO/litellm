@@ -12,6 +12,9 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 import litellm
+import httpx
+from email.parser import BytesParser
+from email.policy import default
 from litellm.proxy._types import ProxyException, UserAPIKeyAuth
 from litellm.proxy.common_request_processing import require_resolved_model
 from litellm.proxy.image_endpoints import endpoints
@@ -53,7 +56,7 @@ def test_image_edit_preserves_repeated_multipart_images_and_mask(monkeypatch, im
     with TestClient(app) as client:
         response = client.post(
             "/v1/images/edits",
-            data={"prompt": "keep the subject", "model": "gpt-image-2"},
+            data={"prompt": "keep the subject", "model": "gpt-image-2", "aspect_ratio": "16:9", "resolution": "2K"},
             files=[
                 (image_field, ("reference-1.png", b"first", "image/png")),
                 (image_field, ("reference-2.png", b"second", "image/png")),
@@ -65,8 +68,77 @@ def test_image_edit_preserves_repeated_multipart_images_and_mask(monkeypatch, im
     assert response.json() == {"data": [{"url": "https://files.example/result.png"}]}
     assert captured_data["prompt"] == "keep the subject"
     assert captured_data["model"] == "gpt-image-2"
+    assert captured_data["aspect_ratio"] == "16:9"
+    assert captured_data["resolution"] == "2K"
     assert [image.read() for image in captured_data["image"]] == [b"first", b"second"]
     assert [mask.read() for mask in captured_data["mask"]] == [b"mask"]
+
+
+def test_zexapi_edit_proxy_maps_ratio_and_tier_through_router(monkeypatch, respx_mock):
+    captured = []
+
+    def respond(request):
+        captured.append(request)
+        return httpx.Response(200, json={"created": 1, "data": [{"url": "https://files.example/result.png"}]})
+
+    respx_mock.post("https://edit.example/v1/images/edits").mock(side_effect=respond)
+    monkeypatch.setattr(litellm, "disable_aiohttp_transport", True)
+    router = litellm.Router(
+        model_list=[
+            {
+                "model_name": "gpt-image-2",
+                "litellm_params": {
+                    "model": "zexapi/" + model,
+                    "api_base": "https://edit.example/v1",
+                    "api_key": "test-key",
+                },
+                "model_info": {"id": model, "supported_endpoints": ["/v1/images/edits"]},
+            }
+            for model in ["image2", "gpt-image2"]
+        ],
+        num_retries=0,
+    )
+
+    async def process(self, **kwargs):
+        return await router.aimage_edit(
+            **{
+                key: self.data[key]
+                for key in ["model", "prompt", "image", "mask", "n", "aspect_ratio", "resolution"]
+                if key in self.data
+            }
+        )
+
+    monkeypatch.setattr(endpoints.ProxyBaseLLMRequestProcessing, "base_process_llm_request", process)
+    monkeypatch.setattr("litellm.proxy.proxy_server.general_settings", {})
+    monkeypatch.setattr("litellm.proxy.proxy_server.user_model", None)
+    app = FastAPI()
+    app.include_router(endpoints.router)
+    app.dependency_overrides[endpoints.user_api_key_auth] = UserAPIKeyAuth
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/images/edits",
+            data={
+                "model": "gpt-image-2",
+                "prompt": "blue circle",
+                "n": "1",
+                "aspect_ratio": "16:9",
+                "resolution": "2K",
+            },
+            files=[("image", ("reference.png", b"\x89PNG\r\n\x1a\nfixture", "image/png"))],
+        )
+    assert response.status_code == 200
+    assert len(captured) == 1
+    request = captured[0]
+    message = BytesParser(policy=default).parsebytes(
+        f"Content-Type: {request.headers['content-type']}\r\n\r\n".encode() + request.content
+    )
+    fields = {
+        part.get_param("name", header="content-disposition"): part.get_payload(decode=True).decode()
+        for part in message.iter_parts()
+        if part.get_filename() is None
+    }
+    assert fields == {"model": "gpt-image2", "prompt": "blue circle", "n": "1", "size": "2560x1440"}
+    assert response.json()["data"][0]["url"] == "https://files.example/result.png"
 
 
 @pytest.mark.asyncio
@@ -201,20 +273,32 @@ async def test_image_preflight_failures_have_distinct_stable_spend_log_ids(monke
     monkeypatch.setattr("litellm.proxy.proxy_server.llm_router", None)
     monkeypatch.setattr("litellm.proxy.proxy_server.proxy_config", {})
     monkeypatch.setattr("litellm.proxy.proxy_server.user_model", None)
-    monkeypatch.setattr("litellm.proxy.proxy_server.proxy_logging_obj", SimpleNamespace(
-        pre_call_hook=passthrough, post_call_failure_hook=record_failure,
-    ))
+    monkeypatch.setattr(
+        "litellm.proxy.proxy_server.proxy_logging_obj",
+        SimpleNamespace(
+            pre_call_hook=passthrough,
+            post_call_failure_hook=record_failure,
+        ),
+    )
     monkeypatch.setattr(endpoints, "route_request", reject_preflight)
 
     for _ in range(2):
-        async def receive():
-            return {"type": "http.request", "more_body": False, "body": orjson.dumps({
-                "model": "gemini-2.5-flash-image-preview", "prompt": "test",
-                "resolution": "2K", "litellm_call_id": "client-reused-id",
-            })}
 
-        request = Request({"type": "http", "method": "POST",
-                           "path": "/v1/images/generations", "headers": []}, receive)
+        async def receive():
+            return {
+                "type": "http.request",
+                "more_body": False,
+                "body": orjson.dumps(
+                    {
+                        "model": "gemini-2.5-flash-image-preview",
+                        "prompt": "test",
+                        "resolution": "2K",
+                        "litellm_call_id": "client-reused-id",
+                    }
+                ),
+            }
+
+        request = Request({"type": "http", "method": "POST", "path": "/v1/images/generations", "headers": []}, receive)
         with pytest.raises(ProxyException) as exc_info:
             await endpoints.image_generation(request, Response(), UserAPIKeyAuth())
         assert str(exc_info.value.code) == "400"

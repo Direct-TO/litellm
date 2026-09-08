@@ -12,18 +12,25 @@ from litellm.types.images.main import ImageEditOptionalRequestParams
 from litellm.types.utils import ImageResponse
 
 from ..common_utils import build_zexapi_endpoint, get_zexapi_api_key, raise_for_zexapi_error
-from ..image_generation.transformation import get_zexapi_image_model_sizes
+from ..image_generation.transformation import get_zexapi_image_model_sizes, resolve_zexapi_image_size
 
 _ZEXAPI_IMAGE_EDIT_MODELS: Final = frozenset(("image2", "gpt-image2"))
 
 
-def get_zexapi_image_edit_config(model: str) -> "ZexAPIImageEditConfig | None":
+def get_zexapi_image_edit_config(model: str) -> OpenAIImageEditConfig | None:
+    from ..image_generation.async_transformation import ZexAPIAsyncImageEditConfig, is_zexapi_async_image_model
+
+    if is_zexapi_async_image_model(model):
+        return ZexAPIAsyncImageEditConfig()
     if model in _ZEXAPI_IMAGE_EDIT_MODELS:
         return ZexAPIImageEditConfig()
     return None
 
 
 class ZexAPIImageEditConfig(OpenAIImageEditConfig):
+    def get_supported_openai_params(self, model: str) -> list[str]:
+        return [*super().get_supported_openai_params(model), "aspect_ratio", "resolution"]
+
     def map_openai_params(
         self,
         image_edit_optional_params: ImageEditOptionalRequestParams,
@@ -44,7 +51,17 @@ class ZexAPIImageEditConfig(OpenAIImageEditConfig):
                 model=model,
                 llm_provider="zexapi",
             )
-        return dict(image_edit_optional_params)
+        mapped: Final = dict(image_edit_optional_params)
+        if any(image_edit_optional_params.get(field) is not None for field in ("aspect_ratio", "resolution")):
+            size_params: Final[dict[str, object]] = {
+                field: value
+                for field, value in image_edit_optional_params.items()
+                if field in ("size", "aspect_ratio", "resolution") and value is not None
+            }
+            mapped["size"] = resolve_zexapi_image_size(model=model, params=size_params)
+        mapped.pop("aspect_ratio", None)
+        mapped.pop("resolution", None)
+        return mapped
 
     def validate_environment(
         self,

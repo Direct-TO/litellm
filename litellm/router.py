@@ -383,6 +383,8 @@ _IMAGE_GENERATION_PREFLIGHT_PARAMS: Final = frozenset(
         "imageConfig",
         "image_prompt_strength",
         "image_url",
+        "input_fidelity",
+        "mask",
         "moderation",
         "n",
         "num_images",
@@ -409,7 +411,18 @@ _DROPPABLE_IMAGE_GENERATION_PREFLIGHT_PARAMS: Final = frozenset(
     ("imageConfig", "n", "quality", "response_format", "size", "style", "tools", "user", "web_search_options")
 )
 _IMAGE_EDIT_PREFLIGHT_PARAMS: Final = frozenset(
-    ("background", "input_fidelity", "mask", "n", "quality", "response_format", "size", "user")
+    (
+        "aspect_ratio",
+        "background",
+        "input_fidelity",
+        "mask",
+        "n",
+        "quality",
+        "resolution",
+        "response_format",
+        "size",
+        "user",
+    )
 )
 
 
