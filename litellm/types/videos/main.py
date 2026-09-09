@@ -80,6 +80,9 @@ class VideoCreateOptionalRequestParams(TypedDict, total=False):
     model: str | None
     seconds: str | None
     size: str | None
+    resolution: Literal["480p", "720p", "1080p", "2K", "4K"] | None
+    aspect_ratio: str | None
+    references: list[dict[str, str]] | None
     characters: list[dict[str, str]] | None
     user: str | None
     extra_headers: dict[str, str] | None

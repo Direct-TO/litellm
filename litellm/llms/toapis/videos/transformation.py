@@ -17,6 +17,7 @@ from litellm.llms.openai.videos.transformation import OpenAIVideoConfig
 from litellm.types.router import GenericLiteLLMParams
 from litellm.types.videos.main import VideoCreateOptionalRequestParams, VideoObject
 from litellm.types.videos.utils import encode_video_id_with_provider
+from litellm.videos.contract import VIDEO_CONTRACT_FIELDS
 
 from ..common_utils import (
     ToAPISTaskResponse,
@@ -26,6 +27,7 @@ from ..common_utils import (
     parse_toapis_task,
     parse_toapis_video_create_task,
 )
+from .gateway_contract import GATEWAY_VIDEO_MODELS, map_gateway_video
 
 _ValidatedFileContent: TypeAlias = bytes | str | BytesIO | BufferedReader
 
@@ -98,7 +100,7 @@ class ToAPISVideoConfig(OpenAIVideoConfig):
             "size",
             "input_reference",
             "extra_headers",
-        ]
+        ] + (["resolution", "aspect_ratio", "references"] if model in GATEWAY_VIDEO_MODELS else [])
 
     def map_openai_params(
         self,
@@ -113,6 +115,8 @@ class ToAPISVideoConfig(OpenAIVideoConfig):
                 model=model,
                 llm_provider="toapis",
             )
+        if any(video_create_optional_params.get(key) is not None for key in VIDEO_CONTRACT_FIELDS):
+            return map_gateway_video(model, video_create_optional_params, spec.size_field)
         mapped_duration: Final = self._duration(video_create_optional_params.get("seconds"))
         raw_size: Final = video_create_optional_params.get("size")
         mapped_size: Final = raw_size if spec.size_field == "size" else self._aspect_ratio(raw_size)

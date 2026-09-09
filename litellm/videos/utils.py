@@ -4,6 +4,7 @@ import litellm
 from litellm.llms.base_llm.videos.transformation import BaseVideoConfig
 from litellm.types.videos.main import VideoCreateOptionalRequestParams
 from litellm.utils import filter_out_litellm_params
+from litellm.videos.contract import VIDEO_CONTRACT_FIELDS, VIDEO_NATIVE_OVERRIDE_FIELDS, require_video_contract_support
 
 
 class VideoGenerationRequestUtils:
@@ -26,6 +27,23 @@ class VideoGenerationRequestUtils:
         Returns:
             A dictionary of supported parameters for the video generation API
         """
+        supported_params: Final = cast(
+            list[str],
+            video_generation_provider_config.get_supported_openai_params(model),  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]  # BaseVideoConfig retains a legacy bare-list return of parameter names.
+        )
+        require_video_contract_support(
+            video_generation_optional_params,
+            supported_params,
+            model,
+        )
+        if any(video_generation_optional_params.get(key) is not None for key in VIDEO_CONTRACT_FIELDS):
+            extra = video_generation_optional_params.get("extra_body")
+            if extra and VIDEO_NATIVE_OVERRIDE_FIELDS.intersection(extra):
+                raise litellm.UnsupportedParamsError(
+                    message="extra_body cannot override canonical video dimensions or references",
+                    model=model,
+                    llm_provider="",
+                )
         # Map parameters to provider-specific format
         mapped_params: Final = video_generation_provider_config.map_openai_params(
             video_create_optional_params=video_generation_optional_params,
@@ -79,6 +97,8 @@ class VideoGenerationRequestUtils:
             **base_params,
             **cleaned_kwargs,
         }
+        # Native extra_body values are not declarations of the gateway input contract.
+        explicit_contract_fields = {key for key in VIDEO_CONTRACT_FIELDS if optional_params.get(key) is not None}
 
         merged_extra_body: dict[str, Any] = {}
         for extra_body_candidate in (top_level_extra_body, kwargs_extra_body):
@@ -92,6 +112,8 @@ class VideoGenerationRequestUtils:
             if merged_extra_body:
                 optional_params["extra_body"] = merged_extra_body
                 optional_params.update(merged_extra_body)
+                for key in VIDEO_CONTRACT_FIELDS - explicit_contract_fields:
+                    optional_params.pop(key, None)
 
         optional_params.pop("timeout", None)
 

@@ -12098,6 +12098,52 @@ class Router:
             return True
         return True
 
+    @staticmethod
+    def _filter_deployments_by_video_generation_params(
+        model: str,
+        healthy_deployments: list[DeploymentTypedDict] | DeploymentTypedDict,
+        request_kwargs: Mapping[str, object] | None,
+    ) -> list[DeploymentTypedDict] | DeploymentTypedDict:
+        from litellm.types.videos.main import VideoCreateOptionalRequestParams
+        from litellm.videos.contract import VIDEO_CONTRACT_FIELDS
+        from litellm.videos.utils import VideoGenerationRequestUtils
+
+        if not request_kwargs or request_kwargs.get(_ROUTER_CALL_TYPE_KWARG) not in ("video_generation", "avideo_generation"):
+            return healthy_deployments
+        if not any(request_kwargs.get(key) is not None for key in VIDEO_CONTRACT_FIELDS):
+            return healthy_deployments
+        keys = VIDEO_CONTRACT_FIELDS | {"seconds", "size", "width", "height", "input_reference", "extra_body", "parameters", "image", "images", "image_urls", "image_with_roles", "reference_images", "video_with_roles", "video_list", "audio_with_roles", "tools", "generate_audio", "audio", "watermark", "seed"}
+        specific = isinstance(healthy_deployments, dict)
+        candidates = [healthy_deployments] if specific else healthy_deployments
+        accepted: list[DeploymentTypedDict] = []
+        errors: list[str] = []
+        for deployment in candidates:
+            try:
+                merged = {**deployment["litellm_params"], **request_kwargs}
+                params = {key: value for key, value in merged.items() if key in keys and value is not None}
+                physical_model = deployment["litellm_params"].get("model")
+                if not isinstance(physical_model, str):
+                    raise ValueError("Video deployment must declare a provider model")
+                provider_model, provider, _, _ = get_llm_provider(model=physical_model)
+                config = ProviderConfigManager.get_provider_video_config(model=provider_model, provider=LlmProviders(provider))
+                if config is None:
+                    raise ValueError("No video provider mapping")
+                VideoGenerationRequestUtils.get_optional_params_video_generation(
+                    model=provider_model,
+                    video_generation_provider_config=config,
+                    video_generation_optional_params=cast(VideoCreateOptionalRequestParams, params),
+                )
+                accepted.append(deployment)
+            except (litellm.BadRequestError, litellm.UnsupportedParamsError, TypeError, ValueError) as exc:
+                errors.append(str(exc))
+        if not accepted:
+            raise litellm.BadRequestError(
+                message=f"Model '{model}' has no deployment supporting video parameters: {'; '.join(dict.fromkeys(errors))}",
+                model=model,
+                llm_provider="",
+            )
+        return accepted[0] if specific else accepted
+
     @classmethod
     def _filter_deployments_by_image_generation_params(
         cls,
@@ -12245,6 +12291,7 @@ class Router:
             healthy_deployments=healthy_deployments,
             request_kwargs=request_kwargs,  # pyright: ignore[reportUnknownArgumentType]  # Router request kwargs retain legacy bare-dict typing
         )
+        healthy_deployments = self._filter_deployments_by_video_generation_params(model, healthy_deployments, request_kwargs)
 
         if verbose_router_logger.isEnabledFor(logging.DEBUG):
             verbose_router_logger.debug("healthy_deployments after web search filter: %s", healthy_deployments)
@@ -13030,6 +13077,7 @@ class Router:
             healthy_deployments=healthy_deployments,
             request_kwargs=request_kwargs,  # pyright: ignore[reportUnknownArgumentType]  # Router request kwargs retain legacy bare-dict typing
         )
+        healthy_deployments = self._filter_deployments_by_video_generation_params(model, healthy_deployments, request_kwargs)
 
         if isinstance(healthy_deployments, dict):
             if (healthy_deployments.get("model_info") or {}).get("blocked") is True:
