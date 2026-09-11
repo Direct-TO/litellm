@@ -14,8 +14,10 @@ from litellm.llms.openai.videos.transformation import OpenAIVideoConfig
 from litellm.types.router import GenericLiteLLMParams
 from litellm.types.videos.main import VideoCreateOptionalRequestParams, VideoObject
 from litellm.types.videos.utils import encode_video_id_with_provider
+from litellm.videos.contract import VIDEO_CONTRACT_FIELDS
 
 from ..common_utils import build_zexapi_endpoint, get_zexapi_api_key, parse_zexapi_task
+from .gateway_contract import GATEWAY_VIDEO_MODELS, map_gateway_video
 
 _SUPPORTED_PARAMS: Final[frozenset[str]] = frozenset(
     (
@@ -32,7 +34,7 @@ _SUPPORTED_PARAMS: Final[frozenset[str]] = frozenset(
 
 class ZexAPIVideoConfig(OpenAIVideoConfig):
     def get_supported_openai_params(self, model: str) -> list[str]:  # mutable-ok: BaseVideoConfig requires a list
-        return sorted(_SUPPORTED_PARAMS)
+        return sorted(_SUPPORTED_PARAMS | (VIDEO_CONTRACT_FIELDS if model in GATEWAY_VIDEO_MODELS else frozenset()))
 
     def map_openai_params(
         self,
@@ -40,6 +42,10 @@ class ZexAPIVideoConfig(OpenAIVideoConfig):
         model: str,
         drop_params: bool,
     ) -> dict[str, object]:  # mutable-ok: video request utility updates and removes extra_body
+        if model in GATEWAY_VIDEO_MODELS and any(
+            video_create_optional_params.get(key) is not None for key in VIDEO_CONTRACT_FIELDS
+        ):
+            return map_gateway_video(model, video_create_optional_params)
         unsupported: Final = tuple(key for key in video_create_optional_params if key not in _SUPPORTED_PARAMS)
         if unsupported and not drop_params:
             raise ValueError(f"ZexAPI video generation does not support: {', '.join(unsupported)}")

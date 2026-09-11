@@ -2,31 +2,48 @@
 
 网关接受 `resolution`（480p、720p、1080p、2K、4K）、`aspect_ratio`（如 16:9）及有序 `references`（type、url、role）。智能参数省略，文件参考使用 HTTP(S) URL。该契约不与旧像素 `size`、本地 `input_reference` 或原生参考字段混用；非冲突的管理员 `extra_body` 扩展继续保留。
 
-每个模型只接受自身有文档依据的子集，Router 预检与实际提交使用同一映射。不支持时返回参数错误，不删除参数、降档或丢弃素材。参考视频/音频的真实时长、编码、字节大小由供应商继续验证。
+每个模型只接受自身有文档依据的子集，Router 预检与实际提交使用同一映射。不支持时返回参数错误，不删除参数、降档或丢弃素材。参考视频/音频的真实时长、编码、字节大小由供应商继续验证。能力表表示已实现的适配，不代表供应商能力全集；增加模型时必须同时实现字段转换、限制校验和最终 HTTP 请求体测试。
 
 | 模型 | 可用固定档位 | 参考映射 |
 | --- | --- | --- |
+| gemini-omni-flash | 720p、1080p（1080p 仅横屏） | 最多 3 张普通图 → image_urls；无视频/音频/显式首尾帧 |
+| gemini-omni-flash-preview-official | 720p | 最多 10 张普通图 → image_urls，或最多 3 条视频 → video_list；图片与视频互斥；编辑须省略比例 |
+| grok-video-1.0 | 480p、720p | 普通图 → reference_images；首图 → image；合计最多 8 张；无尾帧/视频/音频 |
+| grok-video-1.5 | 480p、720p | 必须且仅有一张图片 → image（接受 reference 或 first_frame）；无尾帧/视频/音频 |
 | seedance-2 | 480p、720p、1080p、4K | image/video/audio_with_roles；首尾帧与普通参考互斥 |
 | seedance-2-fast / mini | 480p、720p | 同上，mini 按文档限制视频/音频数量 |
 | seedance-2-5 | 480p、720p、1080p | 三类 with_roles；允许纯音频参考；首尾帧须智能比例和智能时长 |
 | wan3.0-video | 480p、720p、1080p | 普通图 reference_images、视频 video_list、音频 audio_with_roles、首尾 image_with_roles |
 | MiniMax-H3 | 2K | 三类 with_roles；首尾帧须智能比例；音频不可单独输入 |
-| happyhorse-1.1 | 720p、1080p | 普通参考图与单首帧；源视频编辑需单独 operation，不猜测为生成 |
-| kling-v3 | 720p→std、1080p→pro | 显式首/尾 image_urls |
+| happyhorse-1.1 | 720p→720P、1080p→1080P | 最多 9 张普通图 → reference_images；首帧 → image_urls，比例由首帧决定；1 条视频 → action=video-edit + url，可附最多 5 张普通图 |
+| kling-v3 | 720p→std、1080p→pro | 普通图 → reference_images；首尾帧或混合素材 → image_with_roles，保留显式角色和顺序 |
 | kling-v3-omni / kling-video-o1 | 720p→std、1080p→pro | metadata.image_list；统一 reference 未携带视频 base/feature 意图，故不猜测视频角色 |
 | veo3.1-fast / quality / lite | 720p、1080p、4K | metadata.resolution；两图首尾或三图参考；quality 不接受参考模式 |
 | Veo3.1-fast-official / quality-official | 720p、1080p、4K | 首帧 image_urls、尾帧 metadata.lastFrame、普通图 metadata.referenceImages |
+| zexapi/omni_flash-10s | 固定 720p、10 秒 | 16:9 / 9:16 → size=1280x720 / 720x1280；最多 7 张普通图或 7 条视频 → images；不自动切换到首尾帧型号 |
+| zexapi/omni_flash-10s-fl | 固定 720p、10 秒 | 显式首帧和可选尾帧 → images，按首/尾顺序排列；不接受普通参考图 |
 
-未确认契约的模型、供应商或档位明确拒绝新的扩展字段；旧原生请求形态仍沿用既有适配。特别是 ZexAPI 当前未取得可验证的新分辨率/多模态角色契约，不能宣称支持。
+`seconds` 转为 ToAPIs 的 `duration`；新增校验：Gemini 普通版 4/6/10 秒、Official 1–10 秒、Grok 1–15 秒、Seedance 2/fast 4–15 秒或 -1、mini 4–15 秒、2.5 4–30 秒或 -1、Wan 2–30 秒、HappyHorse/Kling v3 3–15 秒。ZexAPI Omni 的 720p 和 10 秒由型号保证，校验后不发送 resolution/duration；省略 seconds 或 -1 表示采用型号固定时长。
+
+Grok 支持 16:9、9:16、1:1、3:2、2:3；Gemini 和 ZexAPI Omni 支持 16:9、9:16。Gemini Official 视频编辑无法兑现指定宽高比，因此显式指定比例时返回清晰错误，不静默忽略。Gemini 两个型号的文档没有显式首尾帧字段，保留对此类角色的拒绝。
+
+未确认契约的模型、供应商或档位明确拒绝新的扩展字段；旧原生请求形态仍沿用既有适配。
+
+2026-09-11 线上 `/model/info` 按 `model_info.blocked=false` 和视频端点核对：启用 13 个视频型号，包括上表 11 个 ToAPIs 型号（Gemini×2、Grok×2、Seedance×4、Wan、HappyHorse、Kling v3）及 2 个 ZexAPI Omni。其余已配置的视频型号处于停用状态，本次不扩展其适配、不修改启用状态。
 
 依据：
 
+- [Gemini Omni](https://docs.toapis.com/docs/cn/api-reference/videos/gemini-omni-flash/generation)
+- [Gemini Omni Official](https://docs.toapis.com/docs/cn/api-reference/videos/gemini-omni-flash-preview-official/generation)
+- [Grok 1.0](https://docs.toapis.com/docs/cn/api-reference/videos/grok-video/generation)
+- [Grok 1.5](https://docs.toapis.com/docs/cn/api-reference/videos/grok-video-1.5/generation)
+- [ZexAPI Omni](https://6l0ket291i.apifox.cn/462450037e0)
 - [Seedance 2](https://docs.toapis.com/docs/cn/api-reference/videos/seedance-2/generation)
 - [Seedance 2.5](https://docs.toapis.com/docs/cn/api-reference/videos/seedance-2-5/generation)
 - [Wan 3.0](https://docs.toapis.com/docs/cn/api-reference/videos/wan3.0/generation)
 - [MiniMax H3](https://docs.toapis.com/docs/cn/api-reference/videos/minimax-h3/generation)
 - [HappyHorse](https://docs.toapis.com/docs/en/api-reference/videos/happyhorse/generation)
-- [Kling v3](https://docs.toapis.com/docs/en/api-reference/videos/kling-v3/generation)
+- [Kling v3](https://docs.toapis.com/docs/cn/api-reference/videos/kling-v3/generation)
 - [Kling v3 Omni](https://docs.toapis.com/docs/cn/api-reference/videos/kling-v3-omni/generation)
 - [Kling O1](https://docs.toapis.com/docs/cn/api-reference/videos/kling-video-o1/generation)
 - [Veo](https://docs.toapis.com/docs/cn/api-reference/videos/veo3/generation)

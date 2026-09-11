@@ -26,6 +26,7 @@ VIDEO_NATIVE_OVERRIDE_FIELDS: Final = VIDEO_CONTRACT_FIELDS | frozenset(
         "reference_images",
         "video_with_roles",
         "video_list",
+        "url",
         "audio_with_roles",
         "metadata",
         "parameters",

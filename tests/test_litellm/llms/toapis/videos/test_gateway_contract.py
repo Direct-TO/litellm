@@ -33,10 +33,6 @@ def test_resolution_is_not_silently_dropped_with_drop_params(monkeypatch):
     [
         "kling-v2-6",
         "kling-3.0-turbo",
-        "grok-video-1.0",
-        "grok-video-1.5",
-        "gemini-omni-flash",
-        "gemini-omni-flash-preview-official",
         "Veo3.1-lite-official",
     ],
 )

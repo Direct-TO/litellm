@@ -7,6 +7,10 @@ from litellm.exceptions import UnsupportedParamsError
 from litellm.videos.contract import VideoReference, validate_video_contract
 
 _RESOLUTIONS: Final = {
+    "gemini-omni-flash": ("720p", "1080p"),
+    "gemini-omni-flash-preview-official": ("720p",),
+    "grok-video-1.0": ("480p", "720p"),
+    "grok-video-1.5": ("480p", "720p"),
     "seedance-2": ("480p", "720p", "1080p", "4K"),
     "seedance-2-fast": ("480p", "720p"),
     "seedance-2-mini": ("480p", "720p"),
@@ -24,6 +28,21 @@ _RESOLUTIONS: Final = {
     "Veo3.1-quality-official": ("720p", "1080p", "4K"),
 }
 GATEWAY_VIDEO_MODELS: Final = frozenset(_RESOLUTIONS)
+_GEMINI_MODELS: Final = frozenset({"gemini-omni-flash", "gemini-omni-flash-preview-official"})
+_GROK_MODELS: Final = frozenset({"grok-video-1.0", "grok-video-1.5"})
+_DURATIONS: Final = {
+    "gemini-omni-flash": (4, 6, 10),
+    "gemini-omni-flash-preview-official": tuple(range(1, 11)),
+    "grok-video-1.0": tuple(range(1, 16)),
+    "grok-video-1.5": tuple(range(1, 16)),
+    "seedance-2": (-1, *range(4, 16)),
+    "seedance-2-fast": (-1, *range(4, 16)),
+    "seedance-2-mini": tuple(range(4, 16)),
+    "seedance-2-5": (-1, *range(4, 31)),
+    "wan3.0-video": tuple(range(2, 31)),
+    "happyhorse-1.1": tuple(range(3, 16)),
+    "kling-v3": tuple(range(3, 16)),
+}
 _NATIVE_INPUTS: Final = frozenset(
     {
         "image",
@@ -33,6 +52,7 @@ _NATIVE_INPUTS: Final = frozenset(
         "reference_images",
         "video_with_roles",
         "video_list",
+        "url",
         "audio_with_roles",
         "metadata",
         "parameters",
@@ -57,7 +77,10 @@ def map_gateway_video(model: str, params: Mapping[str, object], size_field: str)
     }
     seconds = params.get("seconds")
     if seconds is not None:
-        result["duration"] = int(str(seconds))
+        duration = int(str(seconds))
+        if model in _DURATIONS and duration not in _DURATIONS[model]:
+            _reject(model, f"seconds={seconds!r} is not supported; allowed={_DURATIONS[model]}")
+        result["duration"] = duration
     ratio = params.get("aspect_ratio")
     if ratio is not None:
         known_ratios = {"16:9", "9:16", "1:1", "4:3", "3:4"}
@@ -65,8 +88,12 @@ def map_gateway_video(model: str, params: Mapping[str, object], size_field: str)
             known_ratios.add("21:9")
             if ratio not in known_ratios:
                 _reject(model, f"aspect_ratio={ratio!r} is not supported")
-        elif model == "wan3.0-video" and ratio not in known_ratios:
+        elif model in {"wan3.0-video", "happyhorse-1.1"} and ratio not in known_ratios:
             _reject(model, f"aspect_ratio={ratio!r} is not supported")
+        elif model in _GEMINI_MODELS and ratio not in {"16:9", "9:16"}:
+            _reject(model, "aspect_ratio must be 16:9 or 9:16")
+        elif model in _GROK_MODELS and ratio not in {"16:9", "9:16", "1:1", "3:2", "2:3"}:
+            _reject(model, "aspect_ratio must be 16:9, 9:16, 1:1, 3:2 or 2:3")
         result[size_field] = ratio
     resolution = params.get("resolution")
     if resolution is not None:
@@ -80,6 +107,11 @@ def map_gateway_video(model: str, params: Mapping[str, object], size_field: str)
             result["resolution"] = str(resolution).upper()
         else:
             result["resolution"] = "4k" if resolution == "4K" else resolution
+    if model == "gemini-omni-flash" and resolution == "1080p" and ratio not in (None, "16:9"):
+        _reject(model, "1080p only supports aspect_ratio=16:9")
+    if model in _GEMINI_MODELS | _GROK_MODELS:
+        _map_gemini_grok(model, result, references, params)
+        return result
     if not references:
         return result
 
@@ -88,7 +120,7 @@ def map_gateway_video(model: str, params: Mapping[str, object], size_field: str)
     audios = [ref for ref in references if ref.type == "audio"]
     frames = [ref for ref in images if ref.role != "reference"]
     regular = [ref for ref in references if ref.role == "reference"]
-    if frames and regular:
+    if frames and regular and model != "kling-v3":
         _reject(model, "first/last frames cannot be mixed with ordinary image/video/audio references")
     if params.get("tools"):
         _reject(model, "tools cannot be combined with media references")
@@ -96,15 +128,24 @@ def map_gateway_video(model: str, params: Mapping[str, object], size_field: str)
     if model in {"seedance-2", "seedance-2-fast", "seedance-2-mini", "seedance-2-5", "MiniMax-H3", "wan3.0-video"}:
         _map_multimodal(model, result, images, videos, audios, frames, params)
     elif model == "happyhorse-1.1":
-        if videos or audios or any(ref.role == "last_frame" for ref in images):
+        if audios or any(ref.role == "last_frame" for ref in images):
             _reject(
                 model,
-                "generation supports reference images or a first frame; video editing requires its separate operation",
+                "audio references and last frames are not supported",
             )
-        if len(images) > 9:
-            _reject(model, "at most 9 reference images are supported")
-        result["action"] = "image-to-video" if frames else "reference-to-video"
-        result["image_urls" if frames else "reference_images"] = [ref.url for ref in images]
+        if videos:
+            if len(videos) != 1 or len(images) > 5:
+                _reject(model, "video editing requires one video and at most 5 reference images")
+            result["action"] = "video-edit"
+            result["url"] = videos[0].url
+        else:
+            if len(images) > 9:
+                _reject(model, "at most 9 reference images are supported")
+            if frames and ratio is not None:
+                _reject(model, "first-frame mode uses the source image ratio; select automatic aspect ratio")
+            result["action"] = "image-to-video" if frames else "reference-to-video"
+        if images:
+            result["image_urls" if frames else "reference_images"] = [ref.url for ref in images]
     elif model in {"kling-v3", "kling-v3-omni", "kling-video-o1"}:
         if videos or audios:
             _reject(
@@ -112,9 +153,13 @@ def map_gateway_video(model: str, params: Mapping[str, object], size_field: str)
                 "video references require an explicit provider edit/feature role; audio references are not supported",
             )
         if model == "kling-v3":
-            if not frames:
-                _reject(model, "use explicit first_frame/last_frame roles for image-to-video")
-            result["image_urls"] = [ref.url for ref in sorted(frames, key=lambda ref: ref.role != "first_frame")]
+            if frames:
+                result["image_with_roles"] = [
+                    {"url": ref.url, "role": "reference_image" if ref.role == "reference" else ref.role}
+                    for ref in images
+                ]
+            else:
+                result["reference_images"] = [ref.url for ref in images]
         else:
             result["metadata"] = {
                 "image_list": [
@@ -158,6 +203,52 @@ def map_gateway_video(model: str, params: Mapping[str, object], size_field: str)
     else:
         _reject(model, "no documented lossless mapping for canonical references")
     return result
+
+
+def _map_gemini_grok(
+    model: str,
+    result: dict[str, object],
+    references: list[VideoReference],
+    params: Mapping[str, object],
+) -> None:
+    images = [ref for ref in references if ref.type == "image"]
+    videos = [ref for ref in references if ref.type == "video"]
+    if any(ref.type == "audio" for ref in references):
+        _reject(model, "audio references are not supported")
+    if references and params.get("tools"):
+        _reject(model, "tools cannot be combined with media references")
+    if model in _GEMINI_MODELS:
+        if any(ref.role != "reference" for ref in images):
+            _reject(model, "explicit first/last-frame control has no documented mapping; use ordinary reference images")
+        limit = 3 if model == "gemini-omni-flash" else 10
+        if len(images) > limit:
+            _reject(model, f"at most {limit} reference images are supported")
+        if videos:
+            if model != "gemini-omni-flash-preview-official":
+                _reject(model, "video references are not supported")
+            if images or len(videos) > 3:
+                _reject(model, "use at most 3 input videos without images")
+            if params.get("aspect_ratio") is not None:
+                _reject(model, "video editing cannot honor aspect_ratio; select automatic aspect ratio")
+            result["video_list"] = [{"video_url": ref.url} for ref in videos]
+        elif images:
+            result["image_urls"] = [ref.url for ref in images]
+        return
+    if videos or any(ref.role == "last_frame" for ref in images):
+        _reject(model, "video references and last frames are not supported")
+    if model == "grok-video-1.5":
+        if len(images) != 1:
+            _reject(model, "requires exactly one image reference or first_frame")
+        result["image"] = images[0].url
+    else:
+        if len(images) > 8:
+            _reject(model, "at most 8 images including the main image are supported")
+        first = next((ref for ref in images if ref.role == "first_frame"), None)
+        if first:
+            result["image"] = first.url
+        regular = [ref.url for ref in images if ref.role == "reference"]
+        if regular:
+            result["reference_images"] = regular
 
 
 def _map_multimodal(
