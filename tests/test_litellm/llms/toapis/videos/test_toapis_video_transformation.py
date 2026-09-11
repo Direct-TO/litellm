@@ -212,17 +212,25 @@ def test_toapis_video_task_response_exposes_output_url_and_provider_id():
         ("video_task_123", None, "video_task_123"),
     ],
 )
-def test_toapis_video_create_accepts_live_task_envelope(response_id, task_id, expected_task_id):
+@pytest.mark.parametrize(
+    "status,expected_status",
+    [("", "queued"), ("pending", "queued"), ("queued", "queued"), ("in_progress", "in_progress"), ("completed", "completed"), ("failed", "failed")],
+)
+def test_toapis_video_create_accepts_live_task_envelope(response_id, task_id, expected_task_id, status, expected_status):
     payload = {
         "id": response_id,
         "object": "video",
         "model": "seedance-2-5",
-        "status": "",
-        "progress": 0,
+        "status": status,
+        "progress": 100 if status in ("completed", "failed") else 25 if status == "in_progress" else 0,
         "created_at": 1788419339,
     }
     if task_id is not None:
         payload["task_id"] = task_id
+    if status == "completed":
+        payload["result"] = {"type": "video", "data": [{"url": "https://files.example/video.mp4"}]}
+    if status == "failed":
+        payload["error"] = {"code": "generation_failed", "message": "Provider generation failed"}
 
     result = ToAPISVideoConfig().transform_video_create_response(
         model="seedance-2-5",
@@ -233,12 +241,15 @@ def test_toapis_video_create_accepts_live_task_envelope(response_id, task_id, ex
     decoded = decode_video_id_with_provider(result.id)
 
     assert result.object == "video"
-    assert result.status == "queued"
-    assert result.progress == 0
+    assert result.status == expected_status
+    assert result.progress == payload["progress"]
     assert decoded["video_id"] == expected_task_id
+    assert result.output_url == ("https://files.example/video.mp4" if status == "completed" else None)
+    assert result.error == payload.get("error")
 
 
-def test_toapis_video_status_rejects_live_create_task_envelope():
+@pytest.mark.parametrize("status", ["", "pending", "queued", "in_progress", "completed", "failed"])
+def test_toapis_video_status_rejects_live_create_task_envelope(status):
     with pytest.raises(BaseLLMException) as exc_info:
         ToAPISVideoConfig().transform_video_status_retrieve_response(
             raw_response=httpx.Response(
@@ -247,10 +258,33 @@ def test_toapis_video_status_rejects_live_create_task_envelope():
                     "id": "video_task_123",
                     "task_id": "video_task_123",
                     "object": "video",
-                    "status": "",
+                    "status": status,
                     "progress": 0,
                 },
             ),
+            logging_obj=Mock(),
+            custom_llm_provider="toapis",
+        )
+
+    assert exc_info.value.status_code == 502
+    assert "Invalid ToAPIs task response" in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"status": "unknown"},
+        {"status": None},
+        {"status": 0},
+        {"id": "", "task_id": " "},
+        {"id": None, "task_id": None},
+    ],
+)
+def test_toapis_video_create_rejects_invalid_task_envelope(overrides):
+    with pytest.raises(BaseLLMException) as exc_info:
+        ToAPISVideoConfig().transform_video_create_response(
+            model="wan3.0-video",
+            raw_response=httpx.Response(200, json={"id": "video_task_123", "object": "video", "status": "queued", **overrides}),
             logging_obj=Mock(),
             custom_llm_provider="toapis",
         )
@@ -264,9 +298,11 @@ def test_toapis_video_status_rejects_live_create_task_envelope():
     [
         (302, 502),
         (429, 429),
+        (502, 502),
     ],
 )
-def test_toapis_video_create_only_normalizes_success_responses(status_code, expected_status_code):
+@pytest.mark.parametrize("status", ["", "queued", "in_progress"])
+def test_toapis_video_create_only_normalizes_success_responses(status_code, expected_status_code, status):
     with pytest.raises(BaseLLMException) as exc_info:
         ToAPISVideoConfig().transform_video_create_response(
             model="seedance-2-5",
@@ -275,7 +311,7 @@ def test_toapis_video_create_only_normalizes_success_responses(status_code, expe
                 json={
                     "id": "video_task_123",
                     "object": "video",
-                    "status": "",
+                    "status": status,
                 },
             ),
             logging_obj=Mock(),
@@ -359,21 +395,23 @@ def test_toapis_public_video_generation_normalizes_pending_status(respx_mock):
     }
 
 
-def test_toapis_public_video_generation_accepts_live_create_response(respx_mock):
+@pytest.mark.parametrize("model", ["seedance-2-5", "wan3.0-video"])
+@pytest.mark.parametrize("status,expected_status", [("", "queued"), ("pending", "queued"), ("queued", "queued"), ("in_progress", "in_progress")])
+def test_toapis_public_video_generation_accepts_live_create_response(respx_mock, model, status, expected_status):
     route = respx_mock.post("https://toapis.com/v1/videos/generations").respond(
         json={
             "id": "video_task_123",
             "task_id": "video_task_123",
             "object": "video",
-            "model": "seedance-2-5",
-            "status": "",
+            "model": model,
+            "status": status,
             "progress": 0,
             "created_at": 1788419339,
         }
     )
 
     response = litellm.video_generation(
-        model="toapis/seedance-2-5",
+        model=f"toapis/{model}",
         prompt="waves",
         api_key="test-key",
         seconds="4",
@@ -381,8 +419,9 @@ def test_toapis_public_video_generation_accepts_live_create_response(respx_mock)
     )
     decoded = decode_video_id_with_provider(response.id)
 
-    assert response.status == "queued"
+    assert response.status == expected_status
     assert decoded["video_id"] == "video_task_123"
+    assert decoded["model_id"] == model
     assert route.call_count == 1
 
 

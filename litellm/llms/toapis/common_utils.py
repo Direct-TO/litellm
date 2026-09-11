@@ -157,11 +157,7 @@ def parse_toapis_video_create_task(raw_response: httpx.Response) -> ToAPISTaskRe
         payload_to_validate: object = raw_payload
         if isinstance(raw_payload, Mapping):
             payload: Final = dict(cast(Mapping[str, object], raw_payload))
-            if (
-                200 <= raw_response.status_code < 300
-                and payload.get("object") == "video"
-                and payload.get("status") == ""
-            ):
+            if 200 <= raw_response.status_code < 300 and payload.get("object") == "video":
                 raw_task_id: Final = payload.get("task_id")
                 raw_id: Final = payload.get("id")
                 task_id: Final = (
@@ -177,7 +173,9 @@ def parse_toapis_video_create_task(raw_response: httpx.Response) -> ToAPISTaskRe
                     {
                         "id": task_id,
                         "object": "generation.task",
-                        "status": "queued",
+                        # Some models return a real status in the video envelope.
+                        # Preserve it, especially terminal success/failure states.
+                        "status": "queued" if payload.get("status") == "" else payload.get("status"),
                     }
                 )
             payload_to_validate = payload
