@@ -9,6 +9,7 @@ import litellm
 from litellm._logging import verbose_router_logger
 from litellm.integrations.custom_logger import CustomLogger
 from litellm.litellm_core_utils.sensitive_data_masker import mask_sensitive_structure
+from litellm.llms.base_llm.submission_utils import is_reexecution_blocked
 from litellm.router_utils.add_retry_fallback_headers import (
     add_fallback_headers_to_response,
     get_fallback_error_info,
@@ -424,6 +425,8 @@ async def run_async_fallback(
             )
             return response
         except Exception as e:
+            if is_reexecution_blocked(e):
+                raise
             error_from_fallbacks = e
             fallback_errors = fallback_errors + (get_fallback_error_info(e),)
             await log_failure_fallback_event(

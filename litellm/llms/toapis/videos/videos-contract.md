@@ -29,6 +29,20 @@ Grok 支持 16:9、9:16、1:1、3:2、2:3；Gemini 和 ZexAPI Omni 支持 16:9�
 
 未确认契约的模型、供应商或档位明确拒绝新的扩展字段；旧原生请求形态仍沿用既有适配。
 
+## Seedance 2.5 虚拟人像审核恢复
+
+`toapis/seedance-2-5` 在创建视频时收到明确的 HTTP 400、结构化 `PrivacyInformation` 错误，且错误包含 `input image 'content[n]' ... may contain real person` 时，自动调用同一部署地址和凭据的 `private-avatar` 接口。此流程用于 AI 生成的虚拟人物，不能替代真实人物的 H5 认证。
+
+按 Seedance 的文本在 `content[0]`、图片随后排列的结构，将 `content[n]` 映射到 `image_with_roles` / `image_urls` 的第 n 张图片。越界、缺少索引、自定义 `content`、冲突图片字段或被拦截图片已经是 `asset://` 时保留原错误，不猜测、不整批送审。统一 `references` 与本地图片上传均先沿用既有转换，再处理最终供应商请求体。
+
+只送审被标记的 HTTP(S) 图片，同一次恢复中相同 URL 仅上传一次；每个不同 URL 独立建素材组，避免假定它们属于同一角色。所有目标图片达到 `active` 后，在最终供应商请求体内部替换为 `asset://<asset_id>`，保留顺序、角色、提示词和其他参数，再提交视频一次。统一入口仍要求 HTTP(S) 参考 URL，不向其他供应商放开 `asset://`。
+
+审核流程使用 120 秒预算，每次 HTTP 请求的超时按剩余预算和调用方设置收紧，每 5 秒查询一次；失败、未知状态、无效响应和超时均停止生成并返回错误。日志记录图片序号、group_id 和 asset_id。同一调用中审核开始后的错误带可信重执行阻断标记，Router 不再重试、切换部署或 fallback，但仍保留真实的 rejected / accepted / unknown 提交结果。审核请求移除原生成的幂等键，修正后的生成请求使用派生幂等键。
+
+已有任务 ID、已接受任务的 2xx 响应、普通错误、网络超时和状态查询不启动审核恢复。未知视频提交结果不自动再次 POST。此逻辑只处理创建阶段的确定拒绝；已创建任务在后续查询中才失败时，需要上层保存原请求后另行恢复。
+
+接口依据：[ToAPIs 虚拟人像素材](https://docs.toapis.com/docs/cn/api-reference/videos/seedance-2/private-avatar)。2026-09-13 已手动验证原失败请求的两张虚拟人物图片可达到 `active`；代码回归使用模拟 HTTP 响应，不代表已完成 Seedance 2.5 的真实视频生成验收。
+
 2026-09-11 线上 `/model/info` 按 `model_info.blocked=false` 和视频端点核对：启用 13 个视频型号，包括上表 11 个 ToAPIs 型号（Gemini×2、Grok×2、Seedance×4、Wan、HappyHorse、Kling v3）及 2 个 ZexAPI Omni。其余已配置的视频型号处于停用状态，本次不扩展其适配、不修改启用状态。
 
 依据：

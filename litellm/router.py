@@ -83,7 +83,7 @@ from litellm.litellm_core_utils.sensitive_data_masker import (
     mask_credentials_in_payload,
     mask_sensitive_structure,
 )
-from litellm.llms.base_llm.submission_utils import get_submission_outcome
+from litellm.llms.base_llm.submission_utils import get_submission_outcome, is_reexecution_blocked
 from litellm.llms.openai_like.json_loader import JSONProviderRegistry
 from litellm.router_strategy.budget_limiter import RouterBudgetLimiting
 from litellm.router_strategy.least_busy import LeastBusyLoggingHandler
@@ -6789,6 +6789,8 @@ class Router:
         call_type: Final = kwargs.get(_ROUTER_CALL_TYPE_KWARG)
         if call_type not in _NON_IDEMPOTENT_MEDIA_CALL_TYPES:
             return False
+        if is_reexecution_blocked(exception):
+            return True
         submission_outcome: Final = get_submission_outcome(exception)
         if submission_outcome in ("accepted", "unknown"):
             return True
@@ -7185,6 +7187,8 @@ class Router:
 
                 return response
         except Exception as new_exception:
+            if is_reexecution_blocked(new_exception):
+                raise
             parent_otel_span: Final = _get_parent_otel_span_from_kwargs(kwargs)
             fallback_failure_exception_str = truncate_fallback_error_detail(redact_string(str(new_exception)))
             cooldown_info: Final = await _async_get_cooldown_deployments_with_debug_info(

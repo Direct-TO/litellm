@@ -7107,6 +7107,9 @@ class BaseLLMHTTPHandler:
         Handles video generation requests.
         When _is_async=True, returns a coroutine instead of making the call directly.
         """
+        from litellm.llms.toapis.videos.handler import ToAPISVideoRecoveryError
+        from litellm.llms.toapis.videos.handler import video_generation as toapis_video_generation
+
         if _is_async:
             # Return the async coroutine if called with _is_async=True
             return self.async_video_generation_handler(
@@ -7196,6 +7199,15 @@ class BaseLLMHTTPHandler:
                     files=serialize_multipart_form_fields(data),
                     timeout=timeout,
                 )
+            elif custom_llm_provider == "toapis" and model == "seedance-2-5":
+                response, data = toapis_video_generation(
+                    client=sync_httpx_client,
+                    data=data,  # pyright: ignore[reportUnknownArgumentType]  # BaseVideoConfig retains a bare-dict request contract
+                    url=api_base,
+                    headers=headers,  # pyright: ignore[reportUnknownArgumentType]  # BaseVideoConfig retains a bare-dict header contract
+                    timeout=timeout,
+                    logging_obj=logging_obj,
+                )
             else:
                 response = sync_httpx_client.post(
                     url=api_base,
@@ -7204,6 +7216,8 @@ class BaseLLMHTTPHandler:
                     timeout=timeout,
                 )
 
+        except ToAPISVideoRecoveryError:
+            raise
         except Exception as e:
             raise self._handle_error(
                 e=e,
@@ -7239,6 +7253,13 @@ class BaseLLMHTTPHandler:
         Async version of the video generation handler.
         Uses async HTTP client to make requests.
         """
+        from litellm.llms.toapis.videos.handler import (
+            ToAPISVideoRecoveryError,
+        )
+        from litellm.llms.toapis.videos.handler import (
+            async_video_generation as toapis_async_video_generation,
+        )
+
         if client is None or not isinstance(client, AsyncHTTPHandler):
             async_httpx_client = get_async_httpx_client(
                 llm_provider=litellm.LlmProviders(custom_llm_provider),
@@ -7312,6 +7333,15 @@ class BaseLLMHTTPHandler:
                     files=serialize_multipart_form_fields(data),
                     timeout=timeout,
                 )
+            elif custom_llm_provider == "toapis" and model == "seedance-2-5":
+                response, data = await toapis_async_video_generation(
+                    client=async_httpx_client,
+                    data=data,  # pyright: ignore[reportUnknownArgumentType]  # BaseVideoConfig retains a bare-dict request contract
+                    url=api_base,
+                    headers=headers,  # pyright: ignore[reportUnknownArgumentType]  # BaseVideoConfig retains a bare-dict header contract
+                    timeout=timeout,
+                    logging_obj=logging_obj,
+                )
             else:
                 response = await async_httpx_client.post(
                     url=api_base,
@@ -7320,6 +7350,8 @@ class BaseLLMHTTPHandler:
                     timeout=timeout,
                 )
 
+        except ToAPISVideoRecoveryError:
+            raise
         except Exception as e:
             raise self._handle_error(
                 e=e,

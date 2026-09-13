@@ -8,6 +8,7 @@ SubmissionOutcome = Literal["rejected", "accepted", "unknown"]
 
 _SUBMISSION_OUTCOME_ATTR: Final = "litellm_submission_outcome"
 _PROVIDER_TASK_ID_ATTR: Final = "litellm_provider_task_id"
+_REEXECUTION_BLOCKED_ATTR: Final = "litellm_reexecution_blocked"
 _DEFINITIVE_REJECTION_STATUS_CODES: Final = frozenset((400, 401, 403, 404, 422, 429))
 _DEFINITIVE_503_REJECTION_MARKERS: Final = ("no available channel",)
 _ExceptionT = TypeVar("_ExceptionT", bound=Exception)
@@ -33,7 +34,20 @@ def copy_submission_metadata(source: object, target: _ExceptionT) -> _ExceptionT
     provider_task_id: Final = getattr(source, _PROVIDER_TASK_ID_ATTR, None)
     if isinstance(provider_task_id, str) and provider_task_id:
         setattr(target, _PROVIDER_TASK_ID_ATTR, provider_task_id)
+    if is_reexecution_blocked(source):
+        mark_reexecution_blocked(target)
     return target
+
+
+def mark_reexecution_blocked(exception: _ExceptionT) -> _ExceptionT:
+    """Stop outer retries after provider recovery without changing the billing outcome."""
+    setattr(exception, _REEXECUTION_BLOCKED_ATTR, True)
+    return exception
+
+
+def is_reexecution_blocked(exception: object) -> bool:
+    """Read a trusted adapter marker, never a caller-supplied error body field."""
+    return getattr(exception, _REEXECUTION_BLOCKED_ATTR, False) is True
 
 
 def get_submission_outcome(exception: Exception) -> SubmissionOutcome | None:
