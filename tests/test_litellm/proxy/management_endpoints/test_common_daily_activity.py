@@ -999,12 +999,64 @@ class TestBuildAggregatedSqlQuery:
         fallback = "COALESCE(NULLIF(model_group, ''), model)"
         assert f"{fallback} AS model_group" in normalized
         assert (
-            f"GROUPING(date, api_key, model, {fallback}, "
+            f"GROUPING(date, usage_api_key, model, {fallback}, "
             "custom_llm_provider, mcp_namespaced_tool_name, endpoint) AS group_level" in normalized
         )
-        assert f"(date, {fallback}), (date, {fallback}, api_key)," in normalized
+        assert f"(date, {fallback}), (date, {fallback}, usage_api_key)," in normalized
         assert "(date, model_group)" not in normalized
         assert "COALESCE(model_group, model)" not in normalized
+
+    def test_unrecognized_keys_are_normalized_before_all_key_rollups(self):
+        """Normalize the grouping key, never filter out spend or multiply rows
+        by joining to the non-unique deleted-token history."""
+        from litellm.constants import PTU_SENTINEL_API_KEY
+
+        sql, _ = _build_aggregated_sql_query(
+            table_name="litellm_dailyuserspend",
+            entity_id_field="user_id",
+            entity_id=None,
+            start_date="2026-09-05",
+            end_date="2026-09-12",
+            model=None,
+            api_key=None,
+        )
+        normalized = " ".join(sql.split())
+        assert 'SELECT token FROM "LiteLLM_VerificationToken" UNION SELECT token FROM' in normalized
+        assert '"LiteLLM_DeletedVerificationToken"' in normalized
+        assert "JOIN" not in normalized
+        assert f"api_key IS NULL OR api_key IN ('', '{PTU_SENTINEL_API_KEY}') THEN api_key" in normalized
+        assert "ELSE 'Unrecognized Key'" in normalized
+        assert "usage_api_key AS api_key" in normalized
+        rollups = normalized.split("GROUP BY GROUPING SETS", 1)[1]
+        assert "api_key" not in rollups.replace("usage_api_key", "")
+        assert rollups.count("usage_api_key") == 6
+
+    @pytest.mark.parametrize("api_key", ["unknown-key", ["unknown-key", "deleted-key"]])
+    def test_key_normalization_keeps_original_filters_inside_source_query(self, api_key):
+        sql, params = _build_aggregated_sql_query(
+            table_name="litellm_dailyuserspend",
+            entity_id_field="user_id",
+            entity_id="allowed-user",
+            exclude_entity_ids=["excluded-user"],
+            start_date="2026-09-05",
+            end_date="2026-09-12",
+            model="test-model",
+            api_key=api_key,
+        )
+        source, rollups = sql.split("SELECT\n            date,", 1)
+        assert '"user_id" = $3' in source
+        assert '"user_id" NOT IN ($4)' in source
+        assert "model = $5" in source
+        assert ("api_key IN ($6, $7)" if isinstance(api_key, list) else "api_key = $6") in source
+        assert "WHERE" not in rollups
+        assert params == [
+            "2026-09-05",
+            "2026-09-12",
+            "allowed-user",
+            "excluded-user",
+            "test-model",
+            *(api_key if isinstance(api_key, list) else [api_key]),
+        ]
 
 
 class TestAggregatedEmptyEntityFilter:

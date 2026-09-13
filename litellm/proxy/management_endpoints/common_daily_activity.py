@@ -700,16 +700,36 @@ def _build_aggregated_sql_query(
     # total_successful_requests metadata they feed) once the admin UI reads SGR
     # only from LiteLLM_DailyGatewayRequests. The remaining spend, token and
     # api_requests rollups are still served from here.
+    # Unknown keys (e.g. failed authentication attempts) can outnumber real keys
+    # by orders of magnitude. Collapse them before every key-level rollup, while
+    # retaining active/deleted keys and the PTU sentinel. UNION avoids multiplying
+    # spend when a token has multiple deletion records. Apply all filters to the
+    # original rows so normalization cannot widen a caller's requested scope.
     sql_query: Final = f"""
+        WITH normalized_spend AS (
+            SELECT *,
+                CASE
+                    WHEN api_key IS NULL OR api_key IN ('', '{PTU_SENTINEL_API_KEY}')
+                        THEN api_key
+                    WHEN api_key IN (
+                        SELECT token FROM "LiteLLM_VerificationToken"
+                        UNION
+                        SELECT token FROM "LiteLLM_DeletedVerificationToken"
+                    ) THEN api_key
+                    ELSE 'Unrecognized Key'
+                END AS usage_api_key
+            FROM "{pg_table}"
+            WHERE {where_clause}
+        )
         SELECT
             date,
-            api_key,
+            usage_api_key AS api_key,
             model,
             COALESCE(NULLIF(model_group, ''), model) AS model_group,
             custom_llm_provider,
             mcp_namespaced_tool_name,
             endpoint,
-            GROUPING(date, api_key, model, COALESCE(NULLIF(model_group, ''), model),
+            GROUPING(date, usage_api_key, model, COALESCE(NULLIF(model_group, ''), model),
                      custom_llm_provider, mcp_namespaced_tool_name,
                      endpoint) AS group_level,
             SUM(spend)::float AS spend,
@@ -725,21 +745,20 @@ def _build_aggregated_sql_query(
             SUM(api_requests)::bigint AS api_requests,
             SUM(successful_requests)::bigint AS successful_requests,
             SUM(failed_requests)::bigint AS failed_requests
-        FROM "{pg_table}"
-        WHERE {where_clause}
+        FROM normalized_spend
         GROUP BY GROUPING SETS (
             (date),
-            (date, api_key),
+            (date, usage_api_key),
             (date, model),
-            (date, model, api_key),
+            (date, model, usage_api_key),
             (date, COALESCE(NULLIF(model_group, ''), model)),
-            (date, COALESCE(NULLIF(model_group, ''), model), api_key),
+            (date, COALESCE(NULLIF(model_group, ''), model), usage_api_key),
             (date, custom_llm_provider),
-            (date, custom_llm_provider, api_key),
+            (date, custom_llm_provider, usage_api_key),
             (date, mcp_namespaced_tool_name),
-            (date, mcp_namespaced_tool_name, api_key),
+            (date, mcp_namespaced_tool_name, usage_api_key),
             (date, endpoint),
-            (date, endpoint, api_key),
+            (date, endpoint, usage_api_key),
             ()
         )
     """
