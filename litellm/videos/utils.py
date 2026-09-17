@@ -36,17 +36,27 @@ class VideoGenerationRequestUtils:
             supported_params,
             model,
         )
+        extra = video_generation_optional_params.get("extra_body")
+        if extra and "operation" in extra:
+            raise litellm.UnsupportedParamsError(
+                message="operation must be a top-level video parameter, not an extra_body override",
+                model=model,
+                llm_provider="",
+            )
         if any(video_generation_optional_params.get(key) is not None for key in VIDEO_CONTRACT_FIELDS):
-            extra = video_generation_optional_params.get("extra_body")
             if extra and VIDEO_NATIVE_OVERRIDE_FIELDS.intersection(extra):
                 raise litellm.UnsupportedParamsError(
-                    message="extra_body cannot override canonical video dimensions or references",
+                    message="extra_body cannot override canonical video operation, dimensions or references",
                     model=model,
                     llm_provider="",
                 )
         # Map parameters to provider-specific format
+        provider_params = video_generation_optional_params.copy()
+        if "operation" not in supported_params:
+            # generate is the common default; edit/extend were rejected above.
+            provider_params.pop("operation", None)
         mapped_params: Final = video_generation_provider_config.map_openai_params(
-            video_create_optional_params=video_generation_optional_params,
+            video_create_optional_params=provider_params,
             model=model,
             drop_params=litellm.drop_params,
         )

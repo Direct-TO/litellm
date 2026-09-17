@@ -56,6 +56,9 @@ _NATIVE_INPUTS: Final = frozenset(
         "audio_with_roles",
         "metadata",
         "parameters",
+        "video_operation",
+        "action",
+        "duration",
     }
 )
 
@@ -68,13 +71,34 @@ def map_gateway_video(model: str, params: Mapping[str, object], size_field: str)
     if model not in GATEWAY_VIDEO_MODELS:
         _reject(model, "no documented mapping for canonical video inputs")
     references = validate_video_contract(params)
-    if any(params.get(key) for key in _NATIVE_INPUTS):
+    if any(params.get(key) is not None for key in _NATIVE_INPUTS):
         _reject(model, "canonical video inputs cannot be combined with native reference/metadata overrides")
     result = {
         key: value
         for key, value in params.items()
-        if key not in {"resolution", "aspect_ratio", "references", "seconds", "size", "extra_body"}
+        if key not in {"resolution", "aspect_ratio", "references", "operation", "seconds", "size", "extra_body"}
     }
+    operation = params.get("operation") or "generate"
+    supported_operations = (
+        ("generate", "edit", "extend")
+        if model == "seedance-2-5"
+        else ("generate", "edit")
+        if model in {"happyhorse-1.1", "gemini-omni-flash-preview-official"}
+        else ("generate",)
+    )
+    if operation not in supported_operations:
+        _reject(model, f"operation={operation!r} is not supported; allowed={supported_operations}")
+    if operation != "generate" and not any(ref.type == "video" for ref in references):
+        _reject(model, f"operation={operation!r} requires at least one video reference")
+    if model == "seedance-2-5":
+        result["video_operation"] = operation
+        if operation in ("edit", "extend"):
+            if params.get("aspect_ratio") is not None:
+                _reject(model, f"operation={operation!r} requires automatic aspect_ratio; omit aspect_ratio")
+            if operation == "edit" and params.get("seconds") not in (None, "-1", -1):
+                _reject(model, "operation='edit' requires automatic seconds (-1); omit seconds or use -1")
+            result["aspect_ratio"] = "adaptive"
+            result["duration"] = -1
     seconds = params.get("seconds")
     if seconds is not None:
         duration = int(str(seconds))
@@ -134,6 +158,8 @@ def map_gateway_video(model: str, params: Mapping[str, object], size_field: str)
                 "audio references and last frames are not supported",
             )
         if videos:
+            if operation != "edit":
+                _reject(model, "video input requires operation='edit'; generate does not support video references")
             if len(videos) != 1 or len(images) > 5:
                 _reject(model, "video editing requires one video and at most 5 reference images")
             result["action"] = "video-edit"
@@ -226,6 +252,8 @@ def _map_gemini_grok(
         if videos:
             if model != "gemini-omni-flash-preview-official":
                 _reject(model, "video references are not supported")
+            if params.get("operation") != "edit":
+                _reject(model, "video input requires operation='edit'; generate does not support video references")
             if images or len(videos) > 3:
                 _reject(model, "use at most 3 input videos without images")
             if params.get("aspect_ratio") is not None:

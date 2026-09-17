@@ -77,6 +77,8 @@ async def test_enabled_model_router_submits_documented_payload_once(
         references=references,
     )
     expected = {"model": model, "prompt": "contract fixture", **media}
+    if model == "seedance-2-5":
+        expected["video_operation"] = "generate"
     if provider == "zexapi":
         expected["size"] = "1280x720"
     else:
@@ -115,7 +117,9 @@ def test_grok_main_image_and_regular_images_are_distinct():
 
 def test_official_gemini_maps_three_videos_without_veo_parameters():
     refs = [ref(str(i), kind="video") for i in range(3)]
-    assert mapped("gemini-omni-flash-preview-official", references=refs, resolution="720p", seconds="8") == {
+    assert mapped(
+        "gemini-omni-flash-preview-official", operation="edit", references=refs, resolution="720p", seconds="8"
+    ) == {
         "video_list": [{"video_url": r["url"]} for r in refs],
         "resolution": "720p",
         "duration": 8,
@@ -124,7 +128,7 @@ def test_official_gemini_maps_three_videos_without_veo_parameters():
 
 def test_happyhorse_video_edit_maps_source_and_reference_images():
     video, image = ref("source", kind="video"), ref("style")
-    assert mapped("happyhorse-1.1", references=[video, image], resolution="1080p") == {
+    assert mapped("happyhorse-1.1", operation="edit", references=[video, image], resolution="1080p") == {
         "action": "video-edit",
         "url": video["url"],
         "reference_images": [image["url"]],
@@ -163,11 +167,16 @@ INVALID_CASES = [
     ("toapis", "gemini-omni-flash", {"references": [ref(kind="video")]}, "video references"),
     ("toapis", "gemini-omni-flash", {"references": [ref(role="first_frame")]}, "first/last-frame"),
     ("toapis", "gemini-omni-flash-preview-official", {"resolution": "1080p"}, "resolution"),
-    ("toapis", "gemini-omni-flash-preview-official", {"references": [ref(), ref(kind="video")]}, "without images"),
     (
         "toapis",
         "gemini-omni-flash-preview-official",
-        {"references": [ref(kind="video")], "aspect_ratio": "16:9"},
+        {"operation": "edit", "references": [ref(), ref(kind="video")]},
+        "without images",
+    ),
+    (
+        "toapis",
+        "gemini-omni-flash-preview-official",
+        {"operation": "edit", "references": [ref(kind="video")], "aspect_ratio": "16:9"},
         "cannot honor",
     ),
     ("toapis", "gemini-omni-flash-preview-official", {"references": [ref(kind="audio")]}, "audio references"),
@@ -181,7 +190,12 @@ INVALID_CASES = [
     ),
     ("toapis", "grok-video-1.0", {"aspect_ratio": "4:3"}, "aspect_ratio"),
     ("toapis", "grok-video-1.0", {"resolution": "1080p"}, "resolution"),
-    ("toapis", "happyhorse-1.1", {"references": [ref(kind="video"), ref("two", kind="video")]}, "one video"),
+    (
+        "toapis",
+        "happyhorse-1.1",
+        {"operation": "edit", "references": [ref(kind="video"), ref("two", kind="video")]},
+        "one video",
+    ),
     (
         "toapis",
         "happyhorse-1.1",

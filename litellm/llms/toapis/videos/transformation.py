@@ -100,7 +100,7 @@ class ToAPISVideoConfig(OpenAIVideoConfig):
             "size",
             "input_reference",
             "extra_headers",
-        ] + (["resolution", "aspect_ratio", "references"] if model in GATEWAY_VIDEO_MODELS else [])
+        ] + (["resolution", "aspect_ratio", "references", "operation"] if model in GATEWAY_VIDEO_MODELS else [])
 
     def map_openai_params(
         self,

@@ -6,6 +6,8 @@ from typing import Final
 from litellm.exceptions import UnsupportedParamsError
 from litellm.videos.contract import VIDEO_CONTRACT_FIELDS, require_video_contract_support, validate_video_contract
 
+GATEWAY_VIDEO_FIELDS: Final = frozenset({"resolution", "aspect_ratio", "references"})
+
 GATEWAY_VIDEO_MODELS: Final = frozenset({"omni_flash-10s", "omni_flash-10s-fl"})
 
 
@@ -14,7 +16,7 @@ def _reject(model: str, message: str) -> None:
 
 
 def map_gateway_video(model: str, params: Mapping[str, object]) -> dict[str, object]:
-    require_video_contract_support(params, list(VIDEO_CONTRACT_FIELDS) if model in GATEWAY_VIDEO_MODELS else [], model)
+    require_video_contract_support(params, list(GATEWAY_VIDEO_FIELDS) if model in GATEWAY_VIDEO_MODELS else [], model)
     references = validate_video_contract(params)
     allowed = VIDEO_CONTRACT_FIELDS | {"seconds", "extra_body", "extra_headers"}
     unsupported = sorted(key for key, value in params.items() if value is not None and key not in allowed)

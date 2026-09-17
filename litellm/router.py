@@ -12109,14 +12109,17 @@ class Router:
         request_kwargs: Mapping[str, object] | None,
     ) -> list[DeploymentTypedDict] | DeploymentTypedDict:
         from litellm.types.videos.main import VideoCreateOptionalRequestParams
-        from litellm.videos.contract import VIDEO_CONTRACT_FIELDS
+        from litellm.videos.contract import VIDEO_CONTRACT_FIELDS, VIDEO_NATIVE_OVERRIDE_FIELDS
         from litellm.videos.utils import VideoGenerationRequestUtils
 
         if not request_kwargs or request_kwargs.get(_ROUTER_CALL_TYPE_KWARG) not in ("video_generation", "avideo_generation"):
             return healthy_deployments
-        if not any(request_kwargs.get(key) is not None for key in VIDEO_CONTRACT_FIELDS):
+        extra_body = request_kwargs.get("extra_body")
+        if not any(request_kwargs.get(key) is not None for key in VIDEO_CONTRACT_FIELDS) and not (
+            isinstance(extra_body, dict) and "operation" in extra_body
+        ):
             return healthy_deployments
-        keys = VIDEO_CONTRACT_FIELDS | {"seconds", "size", "width", "height", "input_reference", "extra_body", "parameters", "image", "images", "image_urls", "image_with_roles", "reference_images", "video_with_roles", "video_list", "audio_with_roles", "tools", "generate_audio", "audio", "watermark", "seed"}
+        keys = VIDEO_NATIVE_OVERRIDE_FIELDS | {"extra_body", "tools", "generate_audio", "audio", "watermark", "seed"}
         specific = isinstance(healthy_deployments, dict)
         candidates = [healthy_deployments] if specific else healthy_deployments
         accepted: list[DeploymentTypedDict] = []

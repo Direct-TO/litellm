@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from litellm.exceptions import UnsupportedParamsError
 
-VIDEO_CONTRACT_FIELDS: Final = frozenset({"resolution", "aspect_ratio", "references"})
+VIDEO_CONTRACT_FIELDS: Final = frozenset({"resolution", "aspect_ratio", "references", "operation"})
 VIDEO_RESOLUTIONS: Final = frozenset({"480p", "720p", "1080p", "2K", "4K"})
 VIDEO_NATIVE_OVERRIDE_FIELDS: Final = VIDEO_CONTRACT_FIELDS | frozenset(
     {
@@ -50,6 +50,9 @@ class VideoReference(BaseModel):
 
 
 def validate_video_contract(params: Mapping[str, object]) -> list[VideoReference]:
+    operation = params.get("operation")
+    if operation is not None and (not isinstance(operation, str) or operation not in ("generate", "edit", "extend")):
+        raise ValueError("Video operation must be generate, edit or extend; omit it for generate")
     if not any(params.get(key) is not None for key in VIDEO_CONTRACT_FIELDS):
         return []
     if any(params.get(key) is not None for key in ("size", "width", "height", "input_reference")):
@@ -101,7 +104,13 @@ def require_video_contract_support(params: Mapping[str, object], supported: list
         validate_video_contract(params)
     except ValueError as exc:
         raise UnsupportedParamsError(message=str(exc), model=model, llm_provider="") from exc
-    unsupported = sorted(key for key in VIDEO_CONTRACT_FIELDS if params.get(key) is not None and key not in supported)
+    unsupported = sorted(
+        key
+        for key in VIDEO_CONTRACT_FIELDS
+        if params.get(key) is not None
+        and key not in supported
+        and not (key == "operation" and params.get(key) == "generate")
+    )
     if unsupported:
         raise UnsupportedParamsError(
             message=f"Video model={model!r} has no documented mapping for {', '.join(unsupported)}",

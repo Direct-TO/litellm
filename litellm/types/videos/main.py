@@ -83,6 +83,7 @@ class VideoCreateOptionalRequestParams(TypedDict, total=False):
     resolution: Literal["480p", "720p", "1080p", "2K", "4K"] | None
     aspect_ratio: str | None
     references: list[dict[str, str]] | None
+    operation: Literal["generate", "edit", "extend"] | None  # Omitted means generate.
     characters: list[dict[str, str]] | None
     user: str | None
     extra_headers: dict[str, str] | None

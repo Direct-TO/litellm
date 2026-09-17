@@ -17,7 +17,7 @@ from litellm.types.videos.utils import encode_video_id_with_provider
 from litellm.videos.contract import VIDEO_CONTRACT_FIELDS
 
 from ..common_utils import build_zexapi_endpoint, get_zexapi_api_key, parse_zexapi_task
-from .gateway_contract import GATEWAY_VIDEO_MODELS, map_gateway_video
+from .gateway_contract import GATEWAY_VIDEO_FIELDS, GATEWAY_VIDEO_MODELS, map_gateway_video
 
 _SUPPORTED_PARAMS: Final[frozenset[str]] = frozenset(
     (
@@ -34,7 +34,7 @@ _SUPPORTED_PARAMS: Final[frozenset[str]] = frozenset(
 
 class ZexAPIVideoConfig(OpenAIVideoConfig):
     def get_supported_openai_params(self, model: str) -> list[str]:  # mutable-ok: BaseVideoConfig requires a list
-        return sorted(_SUPPORTED_PARAMS | (VIDEO_CONTRACT_FIELDS if model in GATEWAY_VIDEO_MODELS else frozenset()))
+        return sorted(_SUPPORTED_PARAMS | (GATEWAY_VIDEO_FIELDS if model in GATEWAY_VIDEO_MODELS else frozenset[str]()))
 
     def map_openai_params(
         self,
