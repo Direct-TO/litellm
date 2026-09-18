@@ -241,6 +241,7 @@ from litellm.utils import (
     ModelResponse,
     ProviderConfigManager,
     Rules,
+    filter_out_litellm_params,
     function_setup,
     get_llm_provider,
     get_non_default_completion_params,
@@ -12128,6 +12129,9 @@ class Router:
             try:
                 merged = {**deployment["litellm_params"], **request_kwargs}
                 params = {key: value for key, value in merged.items() if key in keys and value is not None}
+                # Match SDK filtering of internal logging metadata. Keep extra_body
+                # intact so explicit native overrides still undergo contract checks.
+                params = filter_out_litellm_params(params)
                 physical_model = deployment["litellm_params"].get("model")
                 if not isinstance(physical_model, str):
                     raise ValueError("Video deployment must declare a provider model")
