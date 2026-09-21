@@ -2237,6 +2237,11 @@ class ProxyBaseLLMRequestProcessing:
                 llm_router=llm_router,
             )
 
+        if route_type == "avideo_generation":
+            from litellm.proxy.video_endpoints.intent import prepare_video_intent
+
+            await prepare_video_intent(self.data, general_settings, llm_router)
+
         # Defer async logging when post-call guardrails are configured so the
         # StandardLoggingPayload is built after guardrails write to metadata.
         # Cache the result to avoid scanning litellm.callbacks twice.

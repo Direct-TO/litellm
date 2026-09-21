@@ -63,6 +63,7 @@ from litellm.types.utils import (
     StandardPassThroughResponseObject,
     TextCompletionResponse,
 )
+from litellm.types.videos.intent import VideoIntentSettings
 from litellm.types.videos.main import VideoObject
 
 from .types_utils.utils import get_instance_fn, validate_custom_validate_return_type
@@ -2378,6 +2379,10 @@ class ConfigGeneralSettings(LiteLLMPydanticObjectBase):
     )
     video_generation_model: str | None = Field(
         None, description="proxy level default model group for video generation calls"
+    )
+    video_reference_intent: VideoIntentSettings | None = Field(
+        None,
+        description="Server-side prompt intent classification for Seedance reference videos; unset disables it.",
     )
     plugins: list[PluginConfig] | None = Field(
         None, description="external services registered as embeddable UI plugins"

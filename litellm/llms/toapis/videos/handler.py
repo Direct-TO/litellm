@@ -23,6 +23,7 @@ from litellm.llms.base_llm.submission_utils import (
     mark_submission_outcome,
 )
 from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler, HTTPHandler
+from litellm.types.videos.intent import get_video_intent_metadata
 
 from ..common_utils import build_toapis_endpoint, parse_toapis_video_create_task
 
@@ -234,6 +235,12 @@ def _create_steps(
     data: dict[str, object], url: str, headers: Mapping[str, str], timeout: float | httpx.Timeout, logging_obj: Logging
 ) -> _Steps:
     response = _received((yield _Request("POST", url, headers, data, timeout)))
+    logging_params = logging_obj.model_call_details.get("litellm_params", {})
+    if get_video_intent_metadata({**logging_params, "_router_call_type": "avideo_generation"}) is not None:
+        # The automatic-intent entry point promises a single submission, including
+        # when a separate private-avatar recovery would otherwise submit again.
+        yield _finish(response, data)
+        return
     rejected = _rejected_images(response, data)
     if rejected is None:
         yield _finish(response, data)

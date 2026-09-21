@@ -769,6 +769,12 @@ model_list:
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
+  # Internal classifier; clients keep the single reference-generation entry point.
+  # Select any configured chat model here; this is not hard-coded in the implementation.
+  video_reference_intent:
+    classifier_model: deepseek-chat
+    models: [seedance-2-5]
+    timeout: 20
   model_list_generation_only: true
   store_prompts_in_spend_logs: true
   # Opt-in: let CheckBatchCost track cost for unmanaged batches created with a raw

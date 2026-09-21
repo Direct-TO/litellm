@@ -6805,6 +6805,10 @@ class Router:
         exception: Exception,
         kwargs: Mapping[str, object],
     ) -> bool:
+        from litellm.types.videos.intent import get_video_intent_metadata
+
+        if get_video_intent_metadata(kwargs) is not None:
+            return True
         if self._submission_outcome_blocks_reexecution(exception=exception, kwargs=kwargs):
             return True
         return (
@@ -12109,6 +12113,7 @@ class Router:
         healthy_deployments: list[DeploymentTypedDict] | DeploymentTypedDict,
         request_kwargs: Mapping[str, object] | None,
     ) -> list[DeploymentTypedDict] | DeploymentTypedDict:
+        from litellm.types.videos.intent import get_video_intent_metadata
         from litellm.types.videos.main import VideoCreateOptionalRequestParams
         from litellm.videos.contract import VIDEO_CONTRACT_FIELDS, VIDEO_NATIVE_OVERRIDE_FIELDS
         from litellm.videos.utils import VideoGenerationRequestUtils
@@ -12136,6 +12141,11 @@ class Router:
                 if not isinstance(physical_model, str):
                     raise ValueError("Video deployment must declare a provider model")
                 provider_model, provider, _, _ = get_llm_provider(model=physical_model)
+                intent = get_video_intent_metadata(request_kwargs)
+                if intent and intent.get("required_provider") == "toapis" and (
+                    provider != "toapis" or provider_model != "seedance-2-5"
+                ):
+                    raise ValueError("Video edit/continuation intent requires ToAPIs Seedance 2.5")
                 config = ProviderConfigManager.get_provider_video_config(model=provider_model, provider=LlmProviders(provider))
                 if config is None:
                     raise ValueError("No video provider mapping")
