@@ -9,6 +9,7 @@ from datetime import datetime
 from functools import lru_cache
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Final, Literal, NamedTuple, Protocol, TypeAlias, TypeVar, overload
+from urllib.parse import quote
 
 import anyio
 import httpx
@@ -1520,7 +1521,8 @@ class ProxyBaseLLMRequestProcessing:
         headers: Final = {
             "x-litellm-call-id": call_id,
             "x-litellm-model-id": model_id,
-            "x-litellm-model-name": model_name,
+            # Upstream model IDs can contain Unicode; HTTP response headers must be encodable.
+            "x-litellm-model-name": quote(model_name, safe="/") if model_name and not model_name.isascii() else model_name,
             "x-litellm-cache-key": cache_key,
             "x-litellm-model-api-base": (
                 api_base.split("?")[0] if api_base else None
