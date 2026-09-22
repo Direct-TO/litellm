@@ -37,7 +37,7 @@ Grok 支持 16:9、9:16、1:1、3:2、2:3；Gemini 和 ZexAPI Omni 支持 16:9�
 
 ## Seedance 2.5 虚拟人像审核恢复
 
-`toapis/seedance-2-5` 在创建视频时收到明确的 HTTP 400、结构化 `PrivacyInformation` 错误，且错误包含 `input image 'content[n]' ... may contain real person` 时，自动调用同一部署地址和凭据的 `private-avatar` 接口。此流程用于 AI 生成的虚拟人物，不能替代真实人物的 H5 认证。
+`toapis/seedance-2-5` 在创建视频时收到明确的 HTTP 400、结构化 `PrivacyInformation` 错误，或 ToAPIs 将该拒绝展平为 `code=fail_to_fetch_task`，且同一错误节点的 `message` 包含 `input image 'content[n]' ... may contain real person` 时，自动调用同一部署地址和凭据的 `private-avatar` 接口。普通 `fail_to_fetch_task`、缺少明确图片位置或带有已接受/未知提交状态的错误不触发恢复。此流程用于 AI 生成的虚拟人物，不能替代真实人物的 H5 认证。
 
 按 Seedance 的文本在 `content[0]`、图片随后排列的结构，将 `content[n]` 映射到 `image_with_roles` / `image_urls` 的第 n 张图片。越界、缺少索引、自定义 `content`、冲突图片字段或被拦截图片已经是 `asset://` 时保留原错误，不猜测、不整批送审。统一 `references` 与本地图片上传均先沿用既有转换，再处理最终供应商请求体。
 

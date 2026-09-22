@@ -28,6 +28,11 @@ def privacy_error(indices=(1, 4)):
     return {"code": "fail_to_fetch_task", "message": json.dumps(inner), "data": None}
 
 
+def flattened_privacy_error(indices=(1, 4)):
+    nested = json.loads(privacy_error(indices)["message"])
+    return {"code": "fail_to_fetch_task", "message": nested["error"]["message"], "data": None}
+
+
 class AvatarServer:
     def __init__(self, first=None, second=None, review_status="active", fail_second_asset=False):
         self.first = first if first is not None else httpx.Response(400, json=privacy_error())
@@ -126,8 +131,9 @@ def fast_polling(monkeypatch):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("use_async", [False, True])
 @pytest.mark.parametrize("base", ["https://toapis.cn/v1", "https://gateway.example/prefix/v1/videos/generations"])
-async def test_review_only_flagged_images_and_retry_with_preserved_body(use_async, base):
-    server = AvatarServer()
+@pytest.mark.parametrize("error_payload", [privacy_error(), flattened_privacy_error()])
+async def test_review_only_flagged_images_and_retry_with_preserved_body(use_async, base, error_payload):
+    server = AvatarServer(first=httpx.Response(400, json=error_payload))
     references = [
         {"type": "image", "url": f"https://files.example/ref-{index}.png", "role": "reference"} for index in range(1, 5)
     ]
@@ -159,6 +165,28 @@ async def test_review_only_flagged_images_and_retry_with_preserved_body(use_asyn
             assert "/videos/generations/v1/" not in request.url.path
     assert server.requests[0].headers["Idempotency-Key"] == "original-key"
     assert server.requests[-1].headers["Idempotency-Key"].startswith("litellm-avatar-")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("use_async", [False, True])
+async def test_flattened_single_image_rejection_recovers_canvas_request(use_async):
+    server = AvatarServer(first=httpx.Response(400, json=flattened_privacy_error((1,))))
+    response = await generate(
+        server,
+        use_async,
+        prompt="Keep the fictional commuter and blue cup consistent",
+        seconds="4",
+        resolution="480p",
+        references=[{"type": "image", "url": "https://files.example/commuter.png", "role": "reference"}],
+        extra_body={"generate_audio": True},
+    )
+    assert response.status == "queued"
+    assert len(server.creates) == 2
+    assert len(server.groups) == len(server.uploads) == len(server.polls) == 1
+    assert server.uploads[0]["source_url"] == "https://files.example/commuter.png"
+    expected = copy.deepcopy(server.creates[0])
+    expected["image_with_roles"][0]["url"] = "asset://asset-1"
+    assert server.creates[1] == expected
 
 
 @pytest.mark.asyncio
@@ -200,6 +228,17 @@ async def test_uploaded_local_reference_can_be_reviewed(use_async):
         httpx.Response(400, json={**privacy_error(), "task_id": "already-accepted"}),
         httpx.Response(400, json={**privacy_error(), "data": {"id": "already-accepted"}}),
         httpx.Response(400, json={**privacy_error(), "status": "accepted"}),
+        httpx.Response(400, json={"code": "fail_to_fetch_task", "message": "Failed to fetch task", "data": None}),
+        httpx.Response(400, json={"code": "fail_to_fetch_task", "message": "may contain real person"}),
+        httpx.Response(400, json={**flattened_privacy_error(), "code": "InvalidParameter"}),
+        httpx.Response(400, json=flattened_privacy_error((0, 1))),
+        httpx.Response(400, json=flattened_privacy_error((1, 99))),
+        httpx.Response(403, json=flattened_privacy_error()),
+        httpx.Response(503, json=flattened_privacy_error()),
+        httpx.Response(400, json={**flattened_privacy_error(), "task_id": "already-accepted"}),
+        httpx.Response(400, json={**flattened_privacy_error(), "data": {"id": "already-accepted"}}),
+        httpx.Response(400, json={**flattened_privacy_error(), "data": {"status": "accepted"}}),
+        httpx.Response(400, json={**flattened_privacy_error(), "status": "unknown"}),
     ],
 )
 async def test_ambiguous_or_unrelated_failures_never_submit_review(use_async, first):
@@ -254,9 +293,10 @@ async def test_failed_accepted_task_does_not_start_another_video(use_async):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("use_async", [False, True])
-async def test_second_rejection_is_returned_without_another_recovery(use_async):
-    server = AvatarServer(second=httpx.Response(400, json=privacy_error()))
-    with pytest.raises(litellm.BadRequestError, match="PrivacyInformation") as caught:
+@pytest.mark.parametrize("error_payload", [privacy_error(), flattened_privacy_error()])
+async def test_second_rejection_is_returned_without_another_recovery(use_async, error_payload):
+    server = AvatarServer(first=httpx.Response(400, json=error_payload), second=httpx.Response(400, json=error_payload))
+    with pytest.raises(litellm.BadRequestError, match="may contain real person") as caught:
         await generate(server, use_async)
     assert is_reexecution_blocked(caught.value)
     assert len(server.creates) == 2
@@ -266,8 +306,10 @@ async def test_second_rejection_is_returned_without_another_recovery(use_async):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("use_async", [False, True])
 @pytest.mark.parametrize("failure", ["failed", "unknown", "second_failed", "timeout"])
-async def test_all_assets_must_pass_before_any_resubmission(use_async, failure, monkeypatch):
+@pytest.mark.parametrize("error_payload", [privacy_error(), flattened_privacy_error()])
+async def test_all_assets_must_pass_before_any_resubmission(use_async, failure, monkeypatch, error_payload):
     server = AvatarServer(
+        first=httpx.Response(400, json=error_payload),
         review_status=failure if failure in ("failed", "unknown") else "active",
         fail_second_asset=failure == "second_failed",
     )

@@ -72,7 +72,11 @@ def _rejected_images(response: httpx.Response, data: Mapping[str, object]) -> tu
     positions: set[int] = set()
     for node in nodes:
         code, message = node.get("code"), node.get("message")
-        if not isinstance(code, str) or code.split(".")[-1] != "PrivacyInformation" or not isinstance(message, str):
+        if not isinstance(code, str) or not isinstance(message, str):
+            continue
+        # ToAPIs can flatten PrivacyInformation into this wrapper code. The
+        # indexed image-rejection message below is still required for recovery.
+        if code.split(".")[-1] != "PrivacyInformation" and code != "fail_to_fetch_task":
             continue
         match = _IMAGE_REJECTION.search(message)
         if match:
