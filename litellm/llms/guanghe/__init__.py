@@ -1,0 +1,1 @@
+"""Guanghe video provider."""

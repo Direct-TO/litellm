@@ -71,6 +71,10 @@ _EXPECTED_MEDIA_DEPLOYMENTS = {
     "zexapi/gemini-3.1-flash-image-preview",
     "zexapi/omni_flash-10s",
     "zexapi/omni_flash-10s-fl",
+    "guanghe/seedance2.0_企业折扣",
+    "guanghe/seedance2.5_企业折",
+    "guanghe/seedance2.0-fast（企业折扣）",
+    "guanghe/seedance2.0-mini（企业折扣）",
     *(f"toapis/{model}" for model in _TOAPIS_VIDEO_MODELS),
     *(f"zexapi/{model}" for model in _ZEXAPI_VEO_MODELS),
 }
@@ -91,7 +95,7 @@ def test_media_catalogs_match_and_cover_every_configured_deployment():
     configured_media_models = {
         item["litellm_params"]["model"]
         for item in _dev_config()["model_list"]
-        if item["litellm_params"]["model"].startswith(("toapis/", "zexapi/"))
+        if item["litellm_params"]["model"].startswith(("toapis/", "zexapi/", "guanghe/"))
     }
 
     assert main_catalog == backup_catalog
@@ -136,7 +140,7 @@ def test_media_service_defaults_and_failure_cooldown_policy():
     media_deployments = [
         item
         for item in config["model_list"]
-        if item["litellm_params"]["model"].startswith(("toapis/", "zexapi/"))
+        if item["litellm_params"]["model"].startswith(("toapis/", "zexapi/", "guanghe/"))
     ]
 
     assert general_settings.completion_model is None
@@ -152,7 +156,7 @@ def test_media_service_defaults_and_failure_cooldown_policy():
     assert failover_policy.status_codes == [403, 429, 503]
     assert failover_policy.submission_outcomes == ["rejected"]
     assert failover_policy.failure_scope == "provider"
-    assert len(media_deployments) == 51
+    assert len(media_deployments) == 55
     for deployment in media_deployments:
         assert deployment["litellm_params"]["num_retries"] == 0
         assert deployment["model_info"]["allowed_fails"] == 2
@@ -172,6 +176,7 @@ def test_media_service_defaults_and_failure_cooldown_policy():
 def test_router_builds_extensible_media_deployment_groups(monkeypatch):
     monkeypatch.setenv("TOAPIS_API_KEY", "fake-toapis-key")
     monkeypatch.setenv("ZEXAPI_API_KEY", "fake-zexapi-key")
+    monkeypatch.setenv("GUANGHE_API_KEY", "fake-guanghe-key")
     config = _dev_config()
     media_models = [
         item
@@ -217,11 +222,12 @@ def test_router_builds_extensible_media_deployment_groups(monkeypatch):
 def test_all_public_media_models_have_generation_capabilities(monkeypatch):
     monkeypatch.setenv("TOAPIS_API_KEY", "fake-toapis-key")
     monkeypatch.setenv("ZEXAPI_API_KEY", "fake-zexapi-key")
+    monkeypatch.setenv("GUANGHE_API_KEY", "fake-guanghe-key")
     config = _dev_config()
     media_models = [
         item
         for item in config["model_list"]
-        if item["litellm_params"]["model"].startswith(("toapis/", "zexapi/"))
+        if item["litellm_params"]["model"].startswith(("toapis/", "zexapi/", "guanghe/"))
     ]
     router = Router(model_list=media_models)
     public_names = {item["model_name"] for item in media_models}

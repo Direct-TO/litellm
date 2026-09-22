@@ -7013,6 +7013,14 @@ class BaseLLMHTTPHandler:
         client: HTTPHandler,
         timeout: float | httpx.Timeout,
     ) -> dict[str, object]:  # mutable-ok: video adapters require a mutable request dictionary
+        from litellm.llms.guanghe.videos.transformation import GuangheVideoConfig
+
+        if isinstance(video_generation_provider_config, GuangheVideoConfig):
+            from litellm.llms.guanghe.videos.reference_upload import prepare_reference_uploads
+
+            video_generation_optional_request_params = prepare_reference_uploads(
+                video_generation_optional_request_params, litellm_params.api_base, headers, client, timeout
+            )
         upload_request: Final = video_generation_provider_config.get_video_create_input_reference_upload_request(
             video_create_optional_request_params=video_generation_optional_request_params,
             litellm_params=litellm_params,
@@ -7053,6 +7061,14 @@ class BaseLLMHTTPHandler:
         client: AsyncHTTPHandler,
         timeout: float | httpx.Timeout,
     ) -> dict[str, object]:  # mutable-ok: video adapters require a mutable request dictionary
+        from litellm.llms.guanghe.videos.transformation import GuangheVideoConfig
+
+        if isinstance(video_generation_provider_config, GuangheVideoConfig):
+            from litellm.llms.guanghe.videos.reference_upload import async_prepare_reference_uploads
+
+            video_generation_optional_request_params = await async_prepare_reference_uploads(
+                video_generation_optional_request_params, litellm_params.api_base, headers, client, timeout
+            )
         upload_request: Final = video_generation_provider_config.get_video_create_input_reference_upload_request(
             video_create_optional_request_params=video_generation_optional_request_params,
             litellm_params=litellm_params,

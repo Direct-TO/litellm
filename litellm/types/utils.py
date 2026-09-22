@@ -3697,6 +3697,7 @@ class LlmProviders(str, Enum):
     ZAI = "zai"
     TOAPIS = "toapis"
     ZEXAPI = "zexapi"
+    GUANGHE = "guanghe"
     CUSTOM_OPENAI = "custom_openai"
     TEXT_COMPLETION_OPENAI = "text-completion-openai"
     COHERE = "cohere"

@@ -179,6 +179,7 @@ from litellm.router_utils.router_callbacks.track_deployment_metrics import (
     increment_deployment_failures_for_current_minute,
     increment_deployment_successes_for_current_minute,
 )
+from litellm.router_utils.video_task_affinity import filter_video_task_deployments
 from litellm.scheduler import FlowItem, Scheduler
 from litellm.types.images.main import ImageEditOptionalRequestParams
 from litellm.types.llms.openai import (
@@ -6372,6 +6373,8 @@ class Router:
                 client: object | None = None,
                 **kwargs,
             ):
+                if call_type in ("video_status", "video_content"):
+                    kwargs[_ROUTER_CALL_TYPE_KWARG] = call_type
                 return self._generic_api_call_with_fallbacks(original_function=original_function, **kwargs)
 
             return sync_wrapper
@@ -12330,6 +12333,7 @@ class Router:
             request_kwargs=request_kwargs,  # pyright: ignore[reportUnknownArgumentType]  # Router request kwargs retain legacy bare-dict typing
         )
         healthy_deployments = self._filter_deployments_by_video_generation_params(model, healthy_deployments, request_kwargs)
+        healthy_deployments = filter_video_task_deployments(model, healthy_deployments, request_kwargs)
 
         if verbose_router_logger.isEnabledFor(logging.DEBUG):
             verbose_router_logger.debug("healthy_deployments after web search filter: %s", healthy_deployments)
@@ -13116,6 +13120,7 @@ class Router:
             request_kwargs=request_kwargs,  # pyright: ignore[reportUnknownArgumentType]  # Router request kwargs retain legacy bare-dict typing
         )
         healthy_deployments = self._filter_deployments_by_video_generation_params(model, healthy_deployments, request_kwargs)
+        healthy_deployments = filter_video_task_deployments(model, healthy_deployments, request_kwargs)
 
         if isinstance(healthy_deployments, dict):
             if (healthy_deployments.get("model_info") or {}).get("blocked") is True:

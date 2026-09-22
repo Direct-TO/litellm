@@ -620,6 +620,7 @@ xai_models: Set = set()
 zai_models: Set = set()
 toapis_models: Set = set()  # mutable-ok: model registry is populated from the cost map during import
 zexapi_models: Set = set()  # mutable-ok: model registry is populated from the cost map during import
+guanghe_models: Set = set()  # mutable-ok: model registry is populated from the cost map during import
 deepseek_models: Set = set()
 tencent_models: Set = set()
 runwayml_models: Set = set()
@@ -836,6 +837,8 @@ def _populate_provider_model_sets(model_cost_map: Dict) -> None:
             toapis_models.add(key)
         elif value.get("litellm_provider") == "zexapi":
             zexapi_models.add(key)
+        elif value.get("litellm_provider") == "guanghe":
+            guanghe_models.add(key)
         elif value.get("litellm_provider") == "fal_ai":
             fal_ai_models.add(key)
         elif value.get("litellm_provider") == "deepseek":
@@ -1044,6 +1047,7 @@ model_list = list(
     | zai_models
     | toapis_models
     | zexapi_models
+    | guanghe_models
     | fal_ai_models
     | deepseek_models
     | modelscope_models
@@ -1146,6 +1150,7 @@ def _build_models_by_provider() -> dict:
         "zai": zai_models,
         "toapis": toapis_models,
         "zexapi": zexapi_models,
+        "guanghe": guanghe_models,
         "fal_ai": fal_ai_models,
         "deepseek": deepseek_models,
         "tencent": tencent_models,

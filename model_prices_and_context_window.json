@@ -39185,6 +39185,74 @@
             "image"
         ]
     },
+    "guanghe/seedance2.0_企业折扣": {
+        "litellm_provider": "guanghe",
+        "mode": "video_generation",
+        "source": "https://gc.aitoken.name/#/api-docs",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image",
+            "video",
+            "audio"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "guanghe/seedance2.5_企业折": {
+        "litellm_provider": "guanghe",
+        "mode": "video_generation",
+        "source": "https://gc.aitoken.name/#/api-docs",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image",
+            "video",
+            "audio"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "guanghe/seedance2.0-fast（企业折扣）": {
+        "litellm_provider": "guanghe",
+        "mode": "video_generation",
+        "source": "https://gc.aitoken.name/#/api-docs",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image",
+            "video",
+            "audio"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
+    "guanghe/seedance2.0-mini（企业折扣）": {
+        "litellm_provider": "guanghe",
+        "mode": "video_generation",
+        "source": "https://gc.aitoken.name/#/api-docs",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image",
+            "video",
+            "audio"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
     "toapis/seedance-2-5": {
         "litellm_provider": "toapis",
         "mode": "video_generation",

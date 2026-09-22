@@ -9103,6 +9103,10 @@ class ProviderConfigManager:
             from litellm.llms.zexapi.videos.transformation import ZexAPIVideoConfig
 
             return ZexAPIVideoConfig()
+        elif LlmProviders.GUANGHE == provider:
+            from litellm.llms.guanghe.videos.transformation import GuangheVideoConfig
+
+            return GuangheVideoConfig()
         return None
 
     @staticmethod

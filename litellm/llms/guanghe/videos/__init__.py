@@ -1,0 +1,1 @@
+"""Guanghe asynchronous video generation."""

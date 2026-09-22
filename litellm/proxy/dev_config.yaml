@@ -415,30 +415,21 @@ model_list:
       allowed_fails_policy: *media_allowed_fails_policy
   - model_name: seedance-2
     litellm_params:
+      model: guanghe/seedance2.0_企业折扣
+      api_key: os.environ/GUANGHE_API_KEY
+      order: 1
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      allowed_fails_policy: *media_allowed_fails_policy
+      mode: video_generation
+      supported_endpoints: [/v1/videos]
+  - model_name: seedance-2
+    litellm_params:
       model: toapis/seedance-2
       api_key: os.environ/TOAPIS_API_KEY
-      num_retries: 0
-    model_info:
-      allowed_fails: 2
-      cooldown_time: 60
-      supported_endpoints:
-        - /v1/videos
-      allowed_fails_policy: *media_allowed_fails_policy
-  - model_name: seedance-2-fast
-    litellm_params:
-      model: toapis/seedance-2-fast
-      api_key: os.environ/TOAPIS_API_KEY
-      num_retries: 0
-    model_info:
-      allowed_fails: 2
-      cooldown_time: 60
-      supported_endpoints:
-        - /v1/videos
-      allowed_fails_policy: *media_allowed_fails_policy
-  - model_name: seedance-2-mini
-    litellm_params:
-      model: toapis/seedance-2-mini
-      api_key: os.environ/TOAPIS_API_KEY
+      order: 2
       num_retries: 0
     model_info:
       allowed_fails: 2
@@ -448,8 +439,69 @@ model_list:
       allowed_fails_policy: *media_allowed_fails_policy
   - model_name: seedance-2-5
     litellm_params:
+      model: guanghe/seedance2.5_企业折
+      api_key: os.environ/GUANGHE_API_KEY
+      order: 1
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      allowed_fails_policy: *media_allowed_fails_policy
+      mode: video_generation
+      supported_endpoints: [/v1/videos]
+  - model_name: seedance-2-5
+    litellm_params:
       model: toapis/seedance-2-5
       api_key: os.environ/TOAPIS_API_KEY
+      order: 2
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: seedance-2-fast
+    litellm_params:
+      model: guanghe/seedance2.0-fast（企业折扣）
+      api_key: os.environ/GUANGHE_API_KEY
+      order: 1
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      allowed_fails_policy: *media_allowed_fails_policy
+      mode: video_generation
+      supported_endpoints: [/v1/videos]
+  - model_name: seedance-2-fast
+    litellm_params:
+      model: toapis/seedance-2-fast
+      api_key: os.environ/TOAPIS_API_KEY
+      order: 2
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: seedance-2-mini
+    litellm_params:
+      model: guanghe/seedance2.0-mini（企业折扣）
+      api_key: os.environ/GUANGHE_API_KEY
+      order: 1
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      allowed_fails_policy: *media_allowed_fails_policy
+      mode: video_generation
+      supported_endpoints: [/v1/videos]
+  - model_name: seedance-2-mini
+    litellm_params:
+      model: toapis/seedance-2-mini
+      api_key: os.environ/TOAPIS_API_KEY
+      order: 2
       num_retries: 0
     model_info:
       allowed_fails: 2
