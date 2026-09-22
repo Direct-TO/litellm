@@ -6,11 +6,12 @@ from types import MappingProxyType
 from typing import Final, NamedTuple, NoReturn
 
 import httpx
+from aiohttp import ClientConnectorError
 from pydantic import TypeAdapter
 
 from litellm.litellm_core_utils.litellm_logging import Logging as LiteLLMLoggingObj
 from litellm.llms.base_llm.chat.transformation import BaseLLMException
-from litellm.llms.base_llm.submission_utils import mark_submission_outcome
+from litellm.llms.base_llm.submission_utils import mark_reexecution_blocked, mark_submission_outcome
 from litellm.llms.custom_httpx import http_handler as http_handlers
 from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler, HTTPHandler
 from litellm.types.router import GenericLiteLLMParams
@@ -116,6 +117,13 @@ class ToAPISImageGeneration:
         self._log_request(logging_obj, prompt, prepared)
         try:
             initial_response: Final = await self._post_async(async_client, prepared, timeout)
+        except httpx.ConnectError as exc:
+            # aiohttp could not establish the initial connection. This branch is
+            # outside polling; failures after acceptance retain their task identity.
+            # Keep retry a deliberate caller action, not a Router fallback.
+            outcome = "rejected" if isinstance(exc.__cause__, ClientConnectorError) else "unknown"
+            mark_reexecution_blocked(mark_submission_outcome(exc, outcome))
+            raise
         except Exception as exc:
             mark_submission_outcome(exc, "unknown")
             raise
@@ -275,12 +283,16 @@ class ToAPISImageGeneration:
         prepared: _PreparedRequest,
         timeout: float | httpx.Timeout | None,
     ) -> httpx.Response:
-        response: Final[httpx.Response | None] = await client.post(  # pyright: ignore[reportUnknownMemberType]  # AsyncHTTPHandler still uses unparameterized dicts
+        # A single create attempt is essential: the generic handler may replay a
+        # POST after a disconnected response, obscuring whether it was accepted.
+        response: Final = await client.client.post(
             url=prepared.url,
             headers=dict(prepared.headers),  # mutable-ok: legacy HTTP handler requires concrete headers
             json=dict(prepared.data),  # mutable-ok: legacy HTTP handler requires a concrete JSON dict
-            timeout=timeout,
+            timeout=timeout if timeout is not None else client.timeout,
+            follow_redirects=False,
         )
+        response.raise_for_status()
         return self._require_response(response)
 
     def _wait_sync(self, delay: float, deadline: float) -> None:

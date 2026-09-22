@@ -1,9 +1,12 @@
 import asyncio
 import copy
 from datetime import datetime, timezone
+from email.parser import BytesParser
+from email.policy import default
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import orjson
 import pytest
 from fastapi import FastAPI
@@ -12,13 +15,41 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 import litellm
-import httpx
-from email.parser import BytesParser
-from email.policy import default
+from litellm.llms.base_llm.submission_utils import mark_submission_outcome
 from litellm.proxy._types import ProxyException, UserAPIKeyAuth
 from litellm.proxy.common_request_processing import require_resolved_model
 from litellm.proxy.image_endpoints import endpoints
 from litellm.proxy.spend_tracking.spend_tracking_utils import get_logging_payload
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["rejected", "accepted", "unknown", None])
+async def test_image_failure_exposes_only_adapter_submission_provenance(monkeypatch, outcome):
+    async def passthrough(**kwargs):
+        return kwargs["data"]
+
+    async def fail(**kwargs):
+        error = litellm.APIConnectionError(message="Cannot connect to host", model="gpt-image-2", llm_provider="toapis")
+        if outcome:
+            mark_submission_outcome(error, outcome)
+        raise error
+
+    async def ignore(**kwargs):
+        pass
+
+    monkeypatch.setattr("litellm.proxy.proxy_server.add_litellm_data_to_request", passthrough)
+    monkeypatch.setattr("litellm.proxy.proxy_server.general_settings", {})
+    monkeypatch.setattr("litellm.proxy.proxy_server.llm_router", None)
+    monkeypatch.setattr("litellm.proxy.proxy_server.proxy_logging_obj", SimpleNamespace(pre_call_hook=passthrough, post_call_failure_hook=ignore))
+    monkeypatch.setattr(endpoints, "route_request", fail)
+
+    async def receive():
+        return {"type": "http.request", "body": orjson.dumps({"model": "gpt-image-2", "prompt": "test"}), "more_body": False}
+
+    request = Request({"type": "http", "method": "POST", "path": "/v1/images/generations", "headers": []}, receive)
+    with pytest.raises(ProxyException) as caught:
+        await endpoints.image_generation(request, Response(), UserAPIKeyAuth())
+    assert caught.value.headers.get("x-litellm-submission-outcome") == outcome
 
 
 def test_generation_model_is_required_when_no_server_default_is_configured():

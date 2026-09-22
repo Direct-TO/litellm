@@ -14,6 +14,7 @@ from litellm._logging import verbose_proxy_logger
 from litellm.litellm_core_utils.prompt_templates.common_utils import (
     get_str_from_messages,
 )
+from litellm.llms.base_llm.submission_utils import get_submission_outcome
 from litellm.proxy._types import *
 from litellm.proxy.auth.user_api_key_auth import UserAPIKeyAuth, user_api_key_auth
 from litellm.proxy.common_request_processing import ProxyBaseLLMRequestProcessing, require_resolved_model
@@ -205,12 +206,14 @@ async def image_generation(
             )
         else:
             error_msg: Final = f"{e}"
+            submission_outcome = get_submission_outcome(e)
             raise ProxyException(
                 message=getattr(e, "message", error_msg),
                 type=getattr(e, "type", "None"),
                 param=getattr(e, "param", "None"),
                 openai_code=getattr(e, "code", None),
                 code=getattr(e, "status_code", 500),
+                headers={"x-litellm-submission-outcome": submission_outcome} if submission_outcome else None,
             )
 
 
