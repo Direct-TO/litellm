@@ -11,6 +11,8 @@ from litellm.proxy._types import ConfigGeneralSettings
 from litellm.proxy.common_utils.model_capability import resolve_model_capability
 from litellm.types.router import AllowedFailsPolicy, RouterGeneralSettings, WeightedFailoverPolicy
 
+pytestmark = pytest.mark.usefixtures("local_model_cost_map")
+
 _TOAPIS_VIDEO_MODELS = {
     "gemini-omni-flash",
     "gemini-omni-flash-preview-official",
@@ -55,13 +57,16 @@ _ZEXAPI_VEO_MODELS = {
     "veo_3_1-lite-4K",
     "veo_3_1-lite-4K-fl",
 }
+_IMAGE_25_DEPLOYMENTS = {
+    f"toapis/gpt-image-2.5-{variant}{suffix}"
+    for variant in ("flare", "sunburst")
+    for suffix in ("", "-vip")
+}
 _EXPECTED_MEDIA_DEPLOYMENTS = {
-    "toapis/gpt-image-2",
+    *_IMAGE_25_DEPLOYMENTS,
     "toapis/gemini-2.5-flash-image-preview",
     "toapis/gemini-3-pro-image-preview",
     "toapis/gemini-3.1-flash-image-preview",
-    "zexapi/image2",
-    "zexapi/gpt-image2",
     "zexapi/gemini-3-pro-image-preview",
     "zexapi/gemini-3.1-flash-image-preview",
     "zexapi/omni_flash-10s",
@@ -101,7 +106,7 @@ def test_media_models_hide_provider_deployments_behind_public_model_names():
     config = _dev_config()
     model_list = config["model_list"]
     gpt_image_deployments = [
-        item["litellm_params"]["model"] for item in model_list if item["model_name"] == "gpt-image-2"
+        item["litellm_params"]["model"] for item in model_list if item["model_name"].startswith("image-2.5-")
     ]
     banana_deployments = [
         item["litellm_params"]["model"] for item in model_list if item["model_name"] == "gemini-3.1-flash-image-preview"
@@ -109,7 +114,14 @@ def test_media_models_hide_provider_deployments_behind_public_model_names():
     veo_deployments = [item["litellm_params"]["model"] for item in model_list if item["model_name"] == "veo3.1-fast"]
     public_names = {item["model_name"] for item in model_list}
 
-    assert gpt_image_deployments == ["zexapi/image2", "zexapi/gpt-image2", "toapis/gpt-image-2"]
+    assert set(gpt_image_deployments) == _IMAGE_25_DEPLOYMENTS
+    assert "gpt-image-2" not in public_names
+    for variant in ("flare", "sunburst"):
+        group = [item for item in model_list if item["model_name"] == f"image-2.5-{variant}"]
+        assert [(item["litellm_params"]["model"], item["litellm_params"]["order"]) for item in group] == [
+            (f"toapis/gpt-image-2.5-{variant}", 1),
+            (f"toapis/gpt-image-2.5-{variant}-vip", 2),
+        ]
     assert banana_deployments == [
         "toapis/gemini-3.1-flash-image-preview",
         "zexapi/gemini-3.1-flash-image-preview",
@@ -122,7 +134,9 @@ def test_media_service_defaults_and_failure_cooldown_policy():
     config = _dev_config()
     general_settings = ConfigGeneralSettings(**config["general_settings"])
     media_deployments = [
-        item for item in config["model_list"] if item["litellm_params"]["model"].startswith(("toapis/", "zexapi/"))
+        item
+        for item in config["model_list"]
+        if item["litellm_params"]["model"].startswith(("toapis/", "zexapi/"))
     ]
 
     assert general_settings.completion_model is None
@@ -138,7 +152,7 @@ def test_media_service_defaults_and_failure_cooldown_policy():
     assert failover_policy.status_codes == [403, 429, 503]
     assert failover_policy.submission_outcomes == ["rejected"]
     assert failover_policy.failure_scope == "provider"
-    assert len(media_deployments) == 50
+    assert len(media_deployments) == 51
     for deployment in media_deployments:
         assert deployment["litellm_params"]["num_retries"] == 0
         assert deployment["model_info"]["allowed_fails"] == 2
@@ -162,15 +176,16 @@ def test_router_builds_extensible_media_deployment_groups(monkeypatch):
     media_models = [
         item
         for item in config["model_list"]
-        if item["model_name"] in {"gpt-image-2", "gemini-3.1-flash-image-preview", "veo3.1-fast"}
+        if item["model_name"] in {"image-2.5-flare", "image-2.5-sunburst", "gemini-3.1-flash-image-preview", "veo3.1-fast"}
     ]
     router = Router(model_list=media_models, **config["router_settings"])
 
     groups = tuple((item["model_name"], item["litellm_params"]["model"]) for item in router.model_list)
     assert groups == (
-        ("gpt-image-2", "zexapi/image2"),
-        ("gpt-image-2", "zexapi/gpt-image2"),
-        ("gpt-image-2", "toapis/gpt-image-2"),
+        ("image-2.5-flare", "toapis/gpt-image-2.5-flare"),
+        ("image-2.5-flare", "toapis/gpt-image-2.5-flare-vip"),
+        ("image-2.5-sunburst", "toapis/gpt-image-2.5-sunburst"),
+        ("image-2.5-sunburst", "toapis/gpt-image-2.5-sunburst-vip"),
         ("gemini-3.1-flash-image-preview", "toapis/gemini-3.1-flash-image-preview"),
         ("gemini-3.1-flash-image-preview", "zexapi/gemini-3.1-flash-image-preview"),
         ("veo3.1-fast", "toapis/veo3.1-fast"),
@@ -183,6 +198,15 @@ def test_router_builds_extensible_media_deployment_groups(monkeypatch):
         status_codes=[403, 429, 503],
         submission_outcomes=["rejected"],
         failure_scope="provider",
+        model_group_overrides={
+            name: WeightedFailoverPolicy(
+                call_types=["aimage_generation"],
+                status_codes=[400, 401, 403, 404, 422, 429, 503],
+                submission_outcomes=["rejected"],
+                failure_scope="deployment",
+            )
+            for name in ("image-2.5-flare", "image-2.5-sunburst")
+        },
     )
     for deployment in router.model_list:
         assert deployment["litellm_params"]["num_retries"] == 0
@@ -195,7 +219,9 @@ def test_all_public_media_models_have_generation_capabilities(monkeypatch):
     monkeypatch.setenv("ZEXAPI_API_KEY", "fake-zexapi-key")
     config = _dev_config()
     media_models = [
-        item for item in config["model_list"] if item["litellm_params"]["model"].startswith(("toapis/", "zexapi/"))
+        item
+        for item in config["model_list"]
+        if item["litellm_params"]["model"].startswith(("toapis/", "zexapi/"))
     ]
     router = Router(model_list=media_models)
     public_names = {item["model_name"] for item in media_models}
@@ -207,9 +233,7 @@ def test_all_public_media_models_have_generation_capabilities(monkeypatch):
                 item["model_name"] == model_name
                 and item["litellm_params"]["model"]
                 in {
-                    "zexapi/image2",
-                    "zexapi/gpt-image2",
-                    "toapis/gpt-image-2",
+                    *_IMAGE_25_DEPLOYMENTS,
                     "toapis/gemini-2.5-flash-image-preview",
                     "toapis/gemini-3-pro-image-preview",
                     "zexapi/gemini-3-pro-image-preview",

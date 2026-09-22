@@ -6761,9 +6761,16 @@ class Router:
 
     #### [END] ASSISTANTS API ####
 
+    def _get_weighted_failover_policy(self, kwargs: Mapping[str, object]) -> WeightedFailoverPolicy | None:
+        policy = self.weighted_failover_policy
+        model = kwargs.get("model")
+        if policy is not None and policy.model_group_overrides and isinstance(model, str):
+            return policy.model_group_overrides.get(model, policy)
+        return policy
+
     def _weighted_failover_policy_allows(self, exception: Exception, kwargs: Mapping[str, object]) -> bool:
         """Return whether an exception satisfies every configured same-group failover filter."""
-        policy: Final = self.weighted_failover_policy
+        policy: Final = self._get_weighted_failover_policy(kwargs)
         if policy is None:
             return True
 
@@ -6795,7 +6802,16 @@ class Router:
         submission_outcome: Final = get_submission_outcome(exception)
         if submission_outcome in ("accepted", "unknown"):
             return True
-        policy: Final = self.weighted_failover_policy
+        policy: Final = self._get_weighted_failover_policy(kwargs)
+        if (
+            submission_outcome == "rejected"
+            and self.enable_weighted_failover
+            and policy is not None
+            and policy.submission_outcomes is not None
+            and (policy.call_types is None or call_type in policy.call_types)
+        ):
+            # Ordered/external fallbacks must not bypass the media submission policy.
+            return not self._weighted_failover_policy_allows(exception=exception, kwargs=kwargs)
         if submission_outcome is not None or policy is None or policy.submission_outcomes is None:
             return False
         return policy.call_types is None or call_type in policy.call_types
@@ -6872,7 +6888,8 @@ class Router:
         static_failed_id: Final = getattr(exception, _FAILED_STATIC_DEPLOYMENT_ID_ATTR, None)
         if isinstance(static_failed_id, str) and static_failed_id:
             newly_excluded.add(static_failed_id)
-        if self.weighted_failover_policy is not None and self.weighted_failover_policy.failure_scope == "provider":
+        policy = self._get_weighted_failover_policy(kwargs)
+        if policy is not None and policy.failure_scope == "provider":
             raw_failed_provider: Final = getattr(exception, _FAILED_DEPLOYMENT_PROVIDER_ATTR, None)
             failed_provider: str | None = raw_failed_provider if isinstance(raw_failed_provider, str) else None
             if failed_provider is None:

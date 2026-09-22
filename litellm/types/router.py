@@ -115,6 +115,9 @@ class WeightedFailoverPolicy(BaseModel):
     status_codes: list[int] | None = None
     submission_outcomes: list[Literal["rejected", "accepted", "unknown"]] | None = None
     failure_scope: Literal["deployment", "provider"] = "deployment"
+    # Trusted Router configuration only; an exact logical model name selects
+    # a complete replacement policy without changing other model groups.
+    model_group_overrides: dict[str, "WeightedFailoverPolicy"] | None = None
 
     model_config = ConfigDict(protected_namespaces=(), extra="forbid")
 

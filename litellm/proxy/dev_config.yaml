@@ -207,17 +207,19 @@ model_list:
   # Public model_name identifies the model. Provider names stay internal.
   # Same model_name may have multiple provider deployments for one public semantic model.
   # Router preflight keeps endpoint- and parameter-incompatible deployments out of each request.
-  - model_name: gpt-image-2
+  - model_name: image-2.5-flare
     litellm_params:
-      model: zexapi/image2
-      api_key: os.environ/ZEXAPI_API_KEY
+      model: toapis/gpt-image-2.5-flare
+      api_key: os.environ/TOAPIS_API_KEY
+      api_base: https://api.toapis.com/v1
+      order: 1
       num_retries: 0
     model_info:
+      mode: image_generation
       allowed_fails: 2
       cooldown_time: 60
       supported_endpoints:
         - /v1/images/generations
-        - /v1/images/edits
       allowed_fails_policy: &media_allowed_fails_policy
         AuthenticationErrorAllowedFails: 0
         TimeoutErrorAllowedFails: 2
@@ -226,24 +228,43 @@ model_list:
         ServiceUnavailableErrorAllowedFails: 2
         BadGatewayErrorAllowedFails: 2
         NotFoundErrorAllowedFails: 1
-  - model_name: gpt-image-2
+  - model_name: image-2.5-flare
     litellm_params:
-      model: zexapi/gpt-image2
-      api_key: os.environ/ZEXAPI_API_KEY
+      model: toapis/gpt-image-2.5-flare-vip
+      api_key: os.environ/TOAPIS_API_KEY
+      api_base: https://api.toapis.com/v1
+      order: 2
       num_retries: 0
     model_info:
+      mode: image_generation
       allowed_fails: 2
       cooldown_time: 60
       supported_endpoints:
         - /v1/images/generations
-        - /v1/images/edits
       allowed_fails_policy: *media_allowed_fails_policy
-  - model_name: gpt-image-2
+  - model_name: image-2.5-sunburst
     litellm_params:
-      model: toapis/gpt-image-2
+      model: toapis/gpt-image-2.5-sunburst
       api_key: os.environ/TOAPIS_API_KEY
+      api_base: https://api.toapis.com/v1
+      order: 1
       num_retries: 0
     model_info:
+      mode: image_generation
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/images/generations
+      allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: image-2.5-sunburst
+    litellm_params:
+      model: toapis/gpt-image-2.5-sunburst-vip
+      api_key: os.environ/TOAPIS_API_KEY
+      api_base: https://api.toapis.com/v1
+      order: 2
+      num_retries: 0
+    model_info:
+      mode: image_generation
       allowed_fails: 2
       cooldown_time: 60
       supported_endpoints:
@@ -796,6 +817,13 @@ router_settings:
     submission_outcomes:
       - rejected
     failure_scope: provider
+    model_group_overrides:
+      image-2.5-flare: &image_25_failover
+        call_types: [aimage_generation]
+        status_codes: [400, 401, 403, 404, 422, 429, 503]
+        submission_outcomes: [rejected]
+        failure_scope: deployment
+      image-2.5-sunburst: *image_25_failover
 
 sandbox_tools:
   - sandbox_tool_name: e2b_sandbox

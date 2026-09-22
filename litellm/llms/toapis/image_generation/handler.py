@@ -11,13 +11,18 @@ from pydantic import TypeAdapter
 
 from litellm.litellm_core_utils.litellm_logging import Logging as LiteLLMLoggingObj
 from litellm.llms.base_llm.chat.transformation import BaseLLMException
-from litellm.llms.base_llm.submission_utils import mark_reexecution_blocked, mark_submission_outcome
+from litellm.llms.base_llm.submission_utils import (
+    classify_http_submission_outcome,
+    mark_reexecution_blocked,
+    mark_submission_outcome,
+)
 from litellm.llms.custom_httpx import http_handler as http_handlers
 from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler, HTTPHandler
 from litellm.types.router import GenericLiteLLMParams
 from litellm.types.utils import ImageResponse, LlmProviders
 
 from ..common_utils import ToAPISTaskResponse, parse_toapis_task
+from .reference_upload import async_upload_references, upload_references
 from .transformation import ToAPISImageGenerationConfig
 
 DEFAULT_POLLING_INTERVAL: Final = 5.0
@@ -74,15 +79,26 @@ class ToAPISImageGeneration:
                 extra_body=extra_body,
                 client=client if isinstance(client, AsyncHTTPHandler) else None,
             )
-        prepared: Final = self._prepare_request(
+        initial_prepared: Final = self._prepare_request(
             model, prompt, optional_params, litellm_params, api_key, extra_headers, extra_body
         )
         sync_client: Final = (
             client if isinstance(client, HTTPHandler) else http_handlers._get_httpx_client()  # pyright: ignore[reportPrivateUsage, reportUnknownMemberType]  # shared client factory has legacy unparameterized dicts
         )
+        prepared: Final = initial_prepared._replace(
+            data=upload_references(
+                initial_prepared.data,
+                initial_prepared.url.removesuffix("/images/generations") + "/uploads/images",
+                initial_prepared.headers,
+                sync_client,
+                timeout,
+            )
+        )
         self._log_request(logging_obj, prompt, prepared)
         try:
             initial_response: Final = self._post_sync(sync_client, prepared, timeout)
+        except httpx.HTTPStatusError as exc:
+            self._raise_submit_http_error(exc)
         except Exception as exc:
             mark_submission_outcome(exc, "unknown")
             raise
@@ -108,11 +124,20 @@ class ToAPISImageGeneration:
         extra_body: Mapping[str, object] | None = None,
         client: AsyncHTTPHandler | None = None,
     ) -> ImageResponse:
-        prepared: Final = self._prepare_request(
+        initial_prepared: Final = self._prepare_request(
             model, prompt, optional_params, litellm_params, api_key, extra_headers, extra_body
         )
         async_client: Final = client or http_handlers.get_async_httpx_client(  # pyright: ignore[reportUnknownMemberType]  # shared client factory has legacy unparameterized dicts
             llm_provider=LlmProviders.TOAPIS
+        )
+        prepared: Final = initial_prepared._replace(
+            data=await async_upload_references(
+                initial_prepared.data,
+                initial_prepared.url.removesuffix("/images/generations") + "/uploads/images",
+                initial_prepared.headers,
+                async_client,
+                timeout,
+            )
         )
         self._log_request(logging_obj, prompt, prepared)
         try:
@@ -124,6 +149,8 @@ class ToAPISImageGeneration:
             outcome = "rejected" if isinstance(exc.__cause__, ClientConnectorError) else "unknown"
             mark_reexecution_blocked(mark_submission_outcome(exc, outcome))
             raise
+        except httpx.HTTPStatusError as exc:
+            self._raise_submit_http_error(exc)
         except Exception as exc:
             mark_submission_outcome(exc, "unknown")
             raise
@@ -346,6 +373,16 @@ class ToAPISImageGeneration:
             litellm_params=prepared.params,
             encoding=None,
         )
+
+    @staticmethod
+    def _raise_submit_http_error(exc: httpx.HTTPStatusError) -> NoReturn:
+        # The HTTP clients raise before parse_toapis_task can classify a rejected
+        # create. Preserve that response; transport failures remain unknown.
+        response = exc.response
+        raise mark_submission_outcome(
+            BaseLLMException(status_code=response.status_code, message=response.text, headers=response.headers),
+            classify_http_submission_outcome(response),
+        ) from exc
 
     @staticmethod
     def _require_response(response: httpx.Response | None) -> httpx.Response:

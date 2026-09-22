@@ -39110,6 +39110,66 @@
         "supports_tool_choice": true,
         "supports_vision": true
     },
+    "toapis/gpt-image-2.5-flare": {
+        "litellm_provider": "toapis",
+        "mode": "image_generation",
+        "source": "https://docs.toapis.com/docs/cn/api-reference/images/gpt-image-2.5/generation",
+        "supported_endpoints": [
+            "/v1/images/generations"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "image"
+        ]
+    },
+    "toapis/gpt-image-2.5-flare-vip": {
+        "litellm_provider": "toapis",
+        "mode": "image_generation",
+        "source": "https://docs.toapis.com/docs/cn/api-reference/images/gpt-image-2.5-vip/generation",
+        "supported_endpoints": [
+            "/v1/images/generations"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "image"
+        ]
+    },
+    "toapis/gpt-image-2.5-sunburst": {
+        "litellm_provider": "toapis",
+        "mode": "image_generation",
+        "source": "https://docs.toapis.com/docs/cn/api-reference/images/gpt-image-2.5/generation",
+        "supported_endpoints": [
+            "/v1/images/generations"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "image"
+        ]
+    },
+    "toapis/gpt-image-2.5-sunburst-vip": {
+        "litellm_provider": "toapis",
+        "mode": "image_generation",
+        "source": "https://docs.toapis.com/docs/cn/api-reference/images/gpt-image-2.5-vip/generation",
+        "supported_endpoints": [
+            "/v1/images/generations"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "image"
+        ]
+    },
     "toapis/gpt-image-2": {
         "litellm_provider": "toapis",
         "mode": "image_generation",

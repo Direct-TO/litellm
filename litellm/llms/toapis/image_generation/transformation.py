@@ -1,3 +1,4 @@
+import re
 from collections.abc import Mapping, Sequence
 from types import MappingProxyType
 from typing import Final, Literal, NamedTuple, cast
@@ -13,6 +14,7 @@ from litellm.types.llms.openai import AllMessageValues, OpenAIImageGenerationOpt
 from litellm.types.utils import ImageObject, ImageResponse
 
 from ..common_utils import build_toapis_endpoint, get_toapis_api_key, parse_toapis_task
+from .reference_upload import decode_reference
 
 _SUPPORTED_PARAMS: Final[tuple[OpenAIImageGenerationOptionalParams, ...]] = (
     "aspect_ratio",
@@ -104,6 +106,13 @@ _GPT_IMAGE_2_RATIOS: Final[frozenset[str]] = frozenset(
     )
 )
 _STANDARD_IMAGE_CONFIG_FIELDS: Final[frozenset[str]] = frozenset(("aspectRatio", "imageSize", "resolution"))
+_IMAGE_25_MODELS: Final = frozenset(
+    f"gpt-image-2.5-{variant}{suffix}"
+    for variant in ("flare", "sunburst")
+    for suffix in ("", "-vip")
+)
+_PIXEL_IMAGE_MODELS: Final = _IMAGE_25_MODELS | {"gpt-image-2"}
+_PIXEL_SIZE_PATTERN: Final = re.compile(r"([1-9][0-9]*)x([1-9][0-9]*)")
 
 
 class _ImageModelSpec(NamedTuple):
@@ -135,6 +144,10 @@ _BANANA_31_RATIOS: Final = frozenset(
 )
 _MODEL_SPECS: Final[Mapping[str, _ImageModelSpec]] = MappingProxyType(
     {
+        **{
+            model: _ImageModelSpec(_GPT_IMAGE_2_RATIOS, ("1K", "2K", "4K"), "top_level", "reference_images")
+            for model in _IMAGE_25_MODELS
+        },
         "gpt-image-2": _ImageModelSpec(
             _GPT_IMAGE_2_RATIOS,
             ("1k", "2k", "4k"),
@@ -151,6 +164,16 @@ _MODEL_SPECS: Final[Mapping[str, _ImageModelSpec]] = MappingProxyType(
 
 
 def _normalize_reference_urls(value: object, *, model: str) -> tuple[str, ...]:
+    references: Final = _reference_strings(value, model=model)
+    for reference in references:
+        try:
+            decode_reference(reference)
+        except (ValueError, httpx.InvalidURL) as exc:
+            raise UnsupportedParamsError(message=str(exc), model=model, llm_provider="toapis") from exc
+    return references
+
+
+def _reference_strings(value: object, *, model: str) -> tuple[str, ...]:
     if value is None:
         return ()
     if isinstance(value, str):
@@ -210,7 +233,7 @@ def _canonical_resolution(value: object, spec: _ImageModelSpec, *, model: str) -
 
 def _canonical_ratio(value: object, spec: _ImageModelSpec, *, field: str, model: str) -> str:
     official_pixel_spec: Final = (
-        _GPT_IMAGE_2_PIXEL_SPECS.get(value) if model == "gpt-image-2" and isinstance(value, str) else None
+        _GPT_IMAGE_2_PIXEL_SPECS.get(value) if model in _PIXEL_IMAGE_MODELS and isinstance(value, str) else None
     )
     ratio_alias: Final[str | None] = (
         official_pixel_spec[0]
@@ -231,7 +254,10 @@ class ToAPISImageGenerationConfig(BaseImageGenerationConfig):
     def get_supported_openai_params(
         self, model: str
     ) -> list[OpenAIImageGenerationOptionalParams]:  # mutable-ok: BaseImageGenerationConfig requires a list
-        return list(_SUPPORTED_PARAMS)  # mutable-ok: BaseImageGenerationConfig requires a concrete list
+        extra: Final[tuple[OpenAIImageGenerationOptionalParams, ...]] = (
+            ("quality", "background") if model in _IMAGE_25_MODELS else ()
+        )
+        return list(_SUPPORTED_PARAMS + extra)  # mutable-ok: BaseImageGenerationConfig requires a concrete list
 
     def map_openai_params(
         self,
@@ -289,6 +315,40 @@ class ToAPISImageGenerationConfig(BaseImageGenerationConfig):
                 model=model,
                 llm_provider="toapis",
             )
+        raw_size = params.get("size")
+        if (
+            model in _IMAGE_25_MODELS
+            and model.endswith("-vip")
+            and isinstance(raw_size, str)
+            and (pixels := _PIXEL_SIZE_PATTERN.fullmatch(raw_size)) is not None
+            and raw_size not in _GPT_IMAGE_2_PIXEL_SPECS
+        ):
+            # VIP accepts custom pixel dimensions. Do not infer a resolution tier
+            # for sizes outside the published ratio/resolution table.
+            if any(params.get(field) is not None for field in ("resolution",)) or any(
+                image_config.get(field) is not None for field in ("imageSize", "resolution")
+            ):
+                raise UnsupportedParamsError(
+                    message="custom VIP pixel size cannot be combined with resolution",
+                    model=model,
+                    llm_provider="toapis",
+                )
+            for field, value in (
+                ("aspect_ratio", params.get("aspect_ratio")),
+                ("imageConfig.aspectRatio", image_config.get("aspectRatio")),
+            ):
+                if value is not None:
+                    ratio_parts = _canonical_ratio(value, spec, field=field, model=model).split(":")
+                    if int(pixels[1]) * int(ratio_parts[1]) != int(pixels[2]) * int(ratio_parts[0]):
+                        raise UnsupportedParamsError(
+                            message="VIP pixel size and aspect ratio must describe the same aspect ratio",
+                            model=model,
+                            llm_provider="toapis",
+                        )
+            custom_mapped: dict[str, object] = {"size": raw_size, "response_format": "url"}
+            if count is not None:
+                custom_mapped["n"] = 1
+            return self._map_image_25_fields(custom_mapped, params, model)
         raw_ratio_candidates: Final = (
             ("size", params.get("size")),
             ("aspect_ratio", params.get("aspect_ratio")),
@@ -354,6 +414,42 @@ class ToAPISImageGenerationConfig(BaseImageGenerationConfig):
                 mapped["reference_images"] = list(reference_urls)
             else:
                 mapped["image_urls"] = [{"url": url} for url in reference_urls]
+        if model in _IMAGE_25_MODELS:
+            if model.endswith("-vip"):
+                mapped["size"] = next(
+                    pixels
+                    for pixels, (pixel_ratio, pixel_resolution) in _GPT_IMAGE_2_PIXEL_SPECS.items()
+                    if pixel_ratio == ratio and pixel_resolution == resolution.lower()
+                )
+                mapped.pop("resolution", None)
+            return self._map_image_25_fields(mapped, params, model)
+        return mapped
+
+    @staticmethod
+    def _map_image_25_fields(
+        mapped: dict[str, object], params: Mapping[str, object], model: str
+    ) -> dict[str, object]:
+        quality = params.get("quality") or "high"
+        if model.endswith("-vip") and quality not in ("low", "medium", "high", "xhigh", "max"):
+            raise UnsupportedParamsError(
+                message="VIP quality must be low, medium, high, xhigh, or max",
+                model=model,
+                llm_provider="toapis",
+            )
+        # Ordinary models always use high, including when callers request low.
+        mapped["quality"] = quality if model.endswith("-vip") else "high"
+        background = params.get("background")
+        if background is not None:
+            if background != "transparent":
+                raise UnsupportedParamsError(
+                    message="ToAPIs image background supports 'transparent' only; omit for normal generation",
+                    model=model,
+                    llm_provider="toapis",
+                )
+            mapped["background"] = background
+        references = _normalize_reference_urls(params.get("image_url"), model=model)
+        if references:
+            mapped["reference_images"] = list(references)
         return mapped
 
     def get_complete_url(
