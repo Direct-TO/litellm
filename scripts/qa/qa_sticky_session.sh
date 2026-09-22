@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # QA: code interpreter sandbox stickiness via metadata.session_id
-#   bash qa_sticky_session.sh
-#   LITELLM_BASE_URL=http://localhost:4000 LITELLM_KEY=sk-1234 bash qa_sticky_session.sh
+#   bash scripts/qa/qa_sticky_session.sh
+#   LITELLM_BASE_URL=http://localhost:4000 LITELLM_KEY=sk-1234 bash scripts/qa/qa_sticky_session.sh
 
 set -euo pipefail
 
