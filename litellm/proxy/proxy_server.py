@@ -568,6 +568,8 @@ try:
 except ImportError:
     build_billing_metrics_recorder = None
     shutdown_billing_metrics_recorder = None
+from litellm.llms.minimax.text_to_speech.contract import SPEECH_REQUEST_SCHEMA
+from litellm.proxy.audio_endpoints.voices import router as audio_voices_router
 from litellm.proxy.middleware.in_flight_requests_middleware import (
     InFlightRequestsMiddleware,
 )
@@ -10769,7 +10771,11 @@ async def _audio_speech_chunk_generator(
     # too small: latency is high
     # too large: latency is low, but memory usage is high
     # 8192 is a good compromise
-    _generator: Final = await _response.aiter_bytes(chunk_size=AUDIO_SPEECH_CHUNK_SIZE)
+    import inspect
+
+    _generator = _response.aiter_bytes(chunk_size=AUDIO_SPEECH_CHUNK_SIZE)
+    if inspect.isawaitable(_generator):
+        _generator = await _generator
     async for chunk in _generator:
         yield chunk
 
@@ -10778,6 +10784,7 @@ async def _audio_speech_chunk_generator(
     "/v1/audio/speech",
     dependencies=[Depends(user_api_key_auth)],
     tags=["audio"],
+    openapi_extra={"requestBody": {"required": True, "content": {"application/json": {"schema": SPEECH_REQUEST_SCHEMA}}}},
 )
 @router.post(
     "/audio/speech",
@@ -10800,6 +10807,12 @@ async def audio_speech(
         # Use orjson to parse JSON data, orjson speeds up requests significantly
         body: Final = await request.body()
         data = orjson.loads(body)
+        from litellm.llms.minimax.text_to_speech.contract import normalize_speech_request
+
+        try:
+            data = normalize_speech_request(data)
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         # Include original request and headers in the data
         data = await add_litellm_data_to_request(
@@ -10821,6 +10834,13 @@ async def audio_speech(
         data = await proxy_logging_obj.pre_call_hook(
             user_api_key_dict=user_api_key_dict, data=data, call_type="aspeech"
         )
+
+        from litellm.proxy.audio_endpoints.voices import prepare_speech
+
+        try:
+            data = await prepare_speech(data, user_api_key_dict)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         ## ROUTE TO CORRECT ENDPOINT ##
         llm_call: Final = await route_request(
@@ -10877,6 +10897,13 @@ async def audio_speech(
                 "tts" in request_model_lower or "preview-tts" in request_model_lower
             ):
                 media_type = "audio/wav"  # Gemini TTS returns WAV format after conversion
+
+        # Provider responses already carry the actual encoding (e.g. MiniMax WAV).
+        binary_response = getattr(response, "response", None)
+        if isinstance(binary_response, httpx.Response):
+            returned_mime = binary_response.headers.get("content-type", "").split(";")[0]
+            if returned_mime.startswith("audio/") or returned_mime == "application/octet-stream":
+                media_type = returned_mime
 
         return StreamingResponse(
             _audio_speech_chunk_generator(response),
@@ -17671,6 +17698,7 @@ app.include_router(rerank_router)
 app.include_router(ocr_router)
 app.include_router(rag_router)
 app.include_router(video_router)
+app.include_router(audio_voices_router)
 app.include_router(container_router)
 app.include_router(search_router)
 app.include_router(image_router)

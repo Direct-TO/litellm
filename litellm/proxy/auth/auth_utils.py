@@ -1557,6 +1557,7 @@ def get_end_user_id_from_request_body(request_body: dict, request_headers: dict 
 
 MODEL_ROUTING_HEADER_NAME: Final = "x-litellm-model"
 _MODEL_ROUTING_ROUTE_MARKERS: Final = (
+    "/audio/voices",
     "/files",
     "/batches",
     "/vector_stores",
@@ -1566,6 +1567,7 @@ _MODEL_ROUTING_ROUTE_MARKERS: Final = (
     "/videos",
 )
 _MODEL_ROUTING_HEADER_OR_QUERY_ROUTE_MARKERS: Final = (
+    "/audio/voices",
     "/files",
     "/batches",
     "/skills",

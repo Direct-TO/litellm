@@ -30552,6 +30552,24 @@
             "/v1/audio/speech"
         ]
     },
+    "minimax/speech-2.8-hd": {
+        "input_cost_per_character": 0.0001,
+        "litellm_provider": "minimax",
+        "mode": "audio_speech",
+        "source": "https://platform.minimax.io/docs/guides/pricing-paygo",
+        "supported_endpoints": [
+            "/v1/audio/speech"
+        ]
+    },
+    "minimax/speech-2.8-turbo": {
+        "input_cost_per_character": 6e-05,
+        "litellm_provider": "minimax",
+        "mode": "audio_speech",
+        "source": "https://platform.minimax.io/docs/guides/pricing-paygo",
+        "supported_endpoints": [
+            "/v1/audio/speech"
+        ]
+    },
     "minimax/MiniMax-M2.1": {
         "input_cost_per_token": 3e-07,
         "output_cost_per_token": 1.2e-06,
