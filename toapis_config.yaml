@@ -1,0 +1,24 @@
+model_list:
+  - model_name: claude-fable-5
+    litellm_params:
+      model: openai/claude-fable-5
+      api_base: https://toapis.com/v1
+      api_key: os.environ/TOAPIS_API_KEY
+  - model_name: gpt-6-astra
+    litellm_params:
+      model: openai/gpt-6-astra
+      api_base: https://toapis.com/v1
+      api_key: os.environ/TOAPIS_API_KEY
+  - model_name: gpt-6-sol
+    litellm_params:
+      model: openai/gpt-6-sol
+      api_base: https://toapis.com/v1
+      api_key: os.environ/TOAPIS_API_KEY
+  - model_name: gemini-3.0-flash
+    litellm_params:
+      model: openai/gemini-3-flash-official
+      api_base: https://toapis.com/v1
+      api_key: os.environ/TOAPIS_API_KEY
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
