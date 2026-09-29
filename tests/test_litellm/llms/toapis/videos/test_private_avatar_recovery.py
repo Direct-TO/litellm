@@ -91,13 +91,13 @@ class AvatarServer:
         return httpx.Response(200, json={"success": True, "message": "", "data": data})
 
 
-async def generate(server, use_async, **overrides):
+async def generate(server, use_async, model="toapis/seedance-2-5", **overrides):
     params = {
-        "model": "toapis/seedance-2-5",
+        "model": model,
         "prompt": "Keep all four fictional references in order",
         "api_key": "deployment-key",
         "api_base": "https://toapis.cn/v1",
-        "seconds": "30",
+        "seconds": "30" if model == "toapis/seedance-2-5" else "8",
         "resolution": "720p",
         "aspect_ratio": "16:9",
         "references": [
@@ -128,11 +128,16 @@ def fast_polling(monkeypatch):
     monkeypatch.setattr(handler, "REVIEW_POLL_INTERVAL_SECONDS", 0.0)
 
 
+@pytest.fixture(params=["toapis/seedance-2", "toapis/seedance-2-mini", "toapis/seedance-2-fast", "toapis/seedance-2-5"])
+def recovery_model(request):
+    return request.param
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("use_async", [False, True])
 @pytest.mark.parametrize("base", ["https://toapis.cn/v1", "https://gateway.example/prefix/v1/videos/generations"])
 @pytest.mark.parametrize("error_payload", [privacy_error(), flattened_privacy_error()])
-async def test_review_only_flagged_images_and_retry_with_preserved_body(use_async, base, error_payload):
+async def test_review_only_flagged_images_and_retry_with_preserved_body(use_async, base, error_payload, recovery_model):
     server = AvatarServer(first=httpx.Response(400, json=error_payload))
     references = [
         {"type": "image", "url": f"https://files.example/ref-{index}.png", "role": "reference"} for index in range(1, 5)
@@ -141,6 +146,7 @@ async def test_review_only_flagged_images_and_retry_with_preserved_body(use_asyn
     response = await generate(
         server,
         use_async,
+        model=recovery_model,
         api_base=base,
         references=references,
         extra_body={"generate_audio": True},
@@ -150,6 +156,7 @@ async def test_review_only_flagged_images_and_retry_with_preserved_body(use_asyn
     assert decode_video_id_with_provider(response.id)["video_id"] == "task-recovered"
     assert references == original
     assert len(server.creates) == 2
+    assert server.creates[0]["model"] == recovery_model.removeprefix("toapis/")
     assert [upload["source_url"] for upload in server.uploads] == [original[0]["url"], original[3]["url"]]
     expected = copy.deepcopy(server.creates[0])
     expected["image_with_roles"][0]["url"] = "asset://asset-1"
@@ -169,11 +176,12 @@ async def test_review_only_flagged_images_and_retry_with_preserved_body(use_asyn
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("use_async", [False, True])
-async def test_flattened_single_image_rejection_recovers_canvas_request(use_async):
+async def test_flattened_single_image_rejection_recovers_canvas_request(use_async, recovery_model):
     server = AvatarServer(first=httpx.Response(400, json=flattened_privacy_error((1,))))
     response = await generate(
         server,
         use_async,
+        model=recovery_model,
         prompt="Keep the fictional commuter and blue cup consistent",
         seconds="4",
         resolution="480p",
@@ -191,11 +199,65 @@ async def test_flattened_single_image_rejection_recovers_canvas_request(use_asyn
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("use_async", [False, True])
-async def test_native_image_urls_deduplicates_only_selected_sources(use_async):
+async def test_frame_recovery_preserves_roles_order_and_model_parameters(use_async, recovery_model):
+    server = AvatarServer(first=httpx.Response(400, json=flattened_privacy_error((1,))))
+    references = [
+        {"type": "image", "url": "https://files.example/last.png", "role": "last_frame"},
+        {"type": "image", "url": "https://files.example/first.png", "role": "first_frame"},
+    ]
+    original = copy.deepcopy(references)
+    is_seedance_25 = recovery_model == "toapis/seedance-2-5"
+    response = await generate(
+        server,
+        use_async,
+        model=recovery_model,
+        references=references,
+        seconds="-1" if is_seedance_25 else "8",
+        aspect_ratio=None if is_seedance_25 else "16:9",
+    )
+    assert response.status == "queued"
+    assert references == original
+    assert len(server.creates) == 2
+    assert [upload["source_url"] for upload in server.uploads] == [original[0]["url"]]
+    expected = copy.deepcopy(server.creates[0])
+    assert expected["model"] == recovery_model.removeprefix("toapis/")
+    assert expected["duration"] == (-1 if is_seedance_25 else 8)
+    assert expected["aspect_ratio"] == ("adaptive" if is_seedance_25 else "16:9")
+    assert expected["image_with_roles"] == [
+        {"url": reference["url"], "role": reference["role"]} for reference in original
+    ]
+    expected["image_with_roles"][0]["url"] = "asset://asset-1"
+    assert server.creates[1] == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("use_async", [False, True])
+async def test_automatic_intent_does_not_start_review_or_resubmit(use_async, recovery_model):
+    server = AvatarServer()
+    with pytest.raises(litellm.BadRequestError, match="may contain real person"):
+        await generate(
+            server,
+            use_async,
+            model=recovery_model,
+            metadata={"seedance_video_intent": {"intent": "generate"}},
+        )
+    assert len(server.creates) == 1
+    assert server.groups == server.uploads == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("use_async", [False, True])
+async def test_native_image_urls_deduplicates_only_selected_sources(use_async, recovery_model):
     server = AvatarServer(first=httpx.Response(400, json=privacy_error((1, 2))))
     urls = ["https://files.example/same.png"] * 2
     await generate(
-        server, use_async, references=None, resolution=None, aspect_ratio=None, extra_body={"image_urls": urls}
+        server,
+        use_async,
+        model=recovery_model,
+        references=None,
+        resolution=None,
+        aspect_ratio=None,
+        extra_body={"image_urls": urls},
     )
     assert len(server.groups) == len(server.uploads) == 1
     assert server.creates[1]["image_urls"] == ["asset://asset-1", "asset://asset-1"]
@@ -204,10 +266,16 @@ async def test_native_image_urls_deduplicates_only_selected_sources(use_async):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("use_async", [False, True])
-async def test_uploaded_local_reference_can_be_reviewed(use_async):
+async def test_uploaded_local_reference_can_be_reviewed(use_async, recovery_model):
     server = AvatarServer(first=httpx.Response(400, json=privacy_error((1,))))
     await generate(
-        server, use_async, references=None, resolution=None, aspect_ratio=None, input_reference=b"\x89PNG\r\n\x1a\n"
+        server,
+        use_async,
+        model=recovery_model,
+        references=None,
+        resolution=None,
+        aspect_ratio=None,
+        input_reference=b"\x89PNG\r\n\x1a\n",
     )
     assert server.uploads[0]["source_url"] == "https://files.example/local.png"
     assert server.creates[1]["image_with_roles"] == [{"url": "asset://asset-1", "role": "reference_image"}]
@@ -241,10 +309,10 @@ async def test_uploaded_local_reference_can_be_reviewed(use_async):
         httpx.Response(400, json={**flattened_privacy_error(), "status": "unknown"}),
     ],
 )
-async def test_ambiguous_or_unrelated_failures_never_submit_review(use_async, first):
+async def test_ambiguous_or_unrelated_failures_never_submit_review(use_async, first, recovery_model):
     server = AvatarServer(first=first)
     with pytest.raises(APIError) as caught:
-        await generate(server, use_async)
+        await generate(server, use_async, model=recovery_model)
     assert caught.value.status_code == first.status_code
     assert len(server.creates) == 1
     assert server.groups == server.uploads == []
@@ -255,7 +323,7 @@ async def test_ambiguous_or_unrelated_failures_never_submit_review(use_async, fi
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("use_async", [False, True])
-async def test_existing_asset_and_unknown_content_layout_do_not_trigger_review(use_async):
+async def test_existing_asset_and_unknown_content_layout_do_not_trigger_review(use_async, recovery_model):
     for extra in [
         {"image_with_roles": [{"url": "asset://old", "role": "reference_image"}]},
         {"image_urls": ["https://files.example/ref.png"], "content": [{"type": "text", "text": "custom"}]},
@@ -266,14 +334,22 @@ async def test_existing_asset_and_unknown_content_layout_do_not_trigger_review(u
     ]:
         server = AvatarServer(first=httpx.Response(400, json=privacy_error((1,))))
         with pytest.raises(APIError):
-            await generate(server, use_async, references=None, resolution=None, aspect_ratio=None, extra_body=extra)
+            await generate(
+                server,
+                use_async,
+                model=recovery_model,
+                references=None,
+                resolution=None,
+                aspect_ratio=None,
+                extra_body=extra,
+            )
         assert len(server.creates) == 1
         assert not server.groups
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("use_async", [False, True])
-async def test_failed_accepted_task_does_not_start_another_video(use_async):
+async def test_failed_accepted_task_does_not_start_another_video(use_async, recovery_model):
     server = AvatarServer(
         first=httpx.Response(
             200,
@@ -285,7 +361,7 @@ async def test_failed_accepted_task_does_not_start_another_video(use_async):
             },
         )
     )
-    response = await generate(server, use_async)
+    response = await generate(server, use_async, model=recovery_model)
     assert response.status == "failed"
     assert len(server.creates) == 1
     assert not server.groups
@@ -294,10 +370,10 @@ async def test_failed_accepted_task_does_not_start_another_video(use_async):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("use_async", [False, True])
 @pytest.mark.parametrize("error_payload", [privacy_error(), flattened_privacy_error()])
-async def test_second_rejection_is_returned_without_another_recovery(use_async, error_payload):
+async def test_second_rejection_is_returned_without_another_recovery(use_async, error_payload, recovery_model):
     server = AvatarServer(first=httpx.Response(400, json=error_payload), second=httpx.Response(400, json=error_payload))
     with pytest.raises(litellm.BadRequestError, match="may contain real person") as caught:
-        await generate(server, use_async)
+        await generate(server, use_async, model=recovery_model)
     assert is_reexecution_blocked(caught.value)
     assert len(server.creates) == 2
     assert len(server.uploads) == len(server.groups) == 2
@@ -307,7 +383,9 @@ async def test_second_rejection_is_returned_without_another_recovery(use_async, 
 @pytest.mark.parametrize("use_async", [False, True])
 @pytest.mark.parametrize("failure", ["failed", "unknown", "second_failed", "timeout"])
 @pytest.mark.parametrize("error_payload", [privacy_error(), flattened_privacy_error()])
-async def test_all_assets_must_pass_before_any_resubmission(use_async, failure, monkeypatch, error_payload):
+async def test_all_assets_must_pass_before_any_resubmission(
+    use_async, failure, monkeypatch, error_payload, recovery_model
+):
     server = AvatarServer(
         first=httpx.Response(400, json=error_payload),
         review_status=failure if failure in ("failed", "unknown") else "active",
@@ -316,7 +394,7 @@ async def test_all_assets_must_pass_before_any_resubmission(use_async, failure, 
     if failure == "timeout":
         monkeypatch.setattr(handler, "REVIEW_TIMEOUT_SECONDS", 0.0)
     with pytest.raises(litellm.BadRequestError, match="video generation was not resubmitted") as caught:
-        await generate(server, use_async)
+        await generate(server, use_async, model=recovery_model)
     assert get_submission_outcome(caught.value) == "rejected"
     assert is_reexecution_blocked(caught.value)
     assert len(server.creates) == 1
@@ -328,10 +406,12 @@ async def test_all_assets_must_pass_before_any_resubmission(use_async, failure, 
 @pytest.mark.parametrize("use_async", [False, True])
 @pytest.mark.parametrize("stage", ["first", "second"])
 @pytest.mark.parametrize("exception", [httpx.ReadTimeout("lost response"), httpx.RemoteProtocolError("lost response")])
-async def test_uncertain_video_submission_preserves_provenance_without_reposting(use_async, stage, exception):
+async def test_uncertain_video_submission_preserves_provenance_without_reposting(
+    use_async, stage, exception, recovery_model
+):
     server = AvatarServer(**{stage: exception})
     with pytest.raises(APIError) as caught:
-        await generate(server, use_async)
+        await generate(server, use_async, model=recovery_model)
     assert get_submission_outcome(caught.value) == "unknown"
     assert len(server.creates) == (1 if stage == "first" else 2)
     assert len(server.uploads) == (0 if stage == "first" else 2)
@@ -339,7 +419,7 @@ async def test_uncertain_video_submission_preserves_provenance_without_reposting
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("use_async", [False, True])
-async def test_review_transport_failure_never_retries_video(use_async):
+async def test_review_transport_failure_never_retries_video(use_async, recovery_model):
     server = AvatarServer()
 
     def fail_review(request):
@@ -348,13 +428,13 @@ async def test_review_transport_failure_never_retries_video(use_async):
         return server(request)
 
     with pytest.raises(litellm.BadRequestError, match="private-avatar transport failed"):
-        await generate(fail_review, use_async)
+        await generate(fail_review, use_async, model=recovery_model)
     assert len(server.creates) == 1
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("use_async", [False, True])
-@pytest.mark.parametrize("model", ["toapis/seedance-2", "toapis/wan3.0-video"])
+@pytest.mark.parametrize("model", ["toapis/grok-video-1.0", "toapis/wan3.0-video"])
 async def test_other_models_keep_existing_error_behavior(use_async, model):
     server = AvatarServer()
     with pytest.raises(litellm.BadRequestError):
@@ -376,7 +456,7 @@ def test_review_respects_remaining_total_budget_and_preserves_component_timeouts
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("use_async", [False, True])
-async def test_processing_review_stops_at_total_deadline(use_async, monkeypatch):
+async def test_processing_review_stops_at_total_deadline(use_async, monkeypatch, recovery_model):
     now = [0.0]
 
     def advance(seconds):
@@ -391,7 +471,7 @@ async def test_processing_review_stops_at_total_deadline(use_async, monkeypatch)
     monkeypatch.setattr(handler, "REVIEW_POLL_INTERVAL_SECONDS", 5.0)
     server = AvatarServer(review_status="processing")
     with pytest.raises(litellm.BadRequestError, match="review timed out") as caught:
-        await generate(server, use_async)
+        await generate(server, use_async, model=recovery_model)
     assert is_reexecution_blocked(caught.value)
     assert now[0] == 6
     assert len(server.creates) == len(server.polls) == 1
@@ -400,7 +480,7 @@ async def test_processing_review_stops_at_total_deadline(use_async, monkeypatch)
 @pytest.mark.asyncio
 @pytest.mark.parametrize("use_async", [False, True])
 @pytest.mark.parametrize("failure", ["http", "json", "success_false", "missing_id", "asset_id", "asset_url"])
-async def test_invalid_review_responses_fail_without_generation(use_async, failure):
+async def test_invalid_review_responses_fail_without_generation(use_async, failure, recovery_model):
     server = AvatarServer()
 
     def invalid_review(request):
@@ -422,14 +502,14 @@ async def test_invalid_review_responses_fail_without_generation(use_async, failu
         return response
 
     with pytest.raises(litellm.BadRequestError) as caught:
-        await generate(invalid_review, use_async)
+        await generate(invalid_review, use_async, model=recovery_model)
     assert is_reexecution_blocked(caught.value)
     assert len(server.creates) == 1
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failure", ["review", "retry"])
-async def test_router_cannot_repeat_recovery_via_retry_policy_order_or_fallback(monkeypatch, failure):
+async def test_router_cannot_repeat_recovery_via_retry_policy_order_or_fallback(monkeypatch, failure, recovery_model):
     from litellm.types.router import RetryPolicy
 
     server = AvatarServer(
@@ -439,14 +519,14 @@ async def test_router_cannot_repeat_recovery_via_retry_policy_order_or_fallback(
 
     async def routed_generate(**kwargs):
         deployments.append(kwargs["api_key"])
-        return await generate(server, True)
+        return await generate(server, True, model=recovery_model)
 
     monkeypatch.setattr("litellm.videos.avideo_generation", routed_generate)
     model_list = [
         {
             "model_name": group,
             "litellm_params": {
-                "model": "toapis/seedance-2-5",
+                "model": recovery_model,
                 "api_key": key,
                 "weight": 1,
                 "order": order,
@@ -478,10 +558,10 @@ async def test_router_cannot_repeat_recovery_via_retry_policy_order_or_fallback(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("use_async", [False, True])
 @pytest.mark.parametrize("stage", ["first", "second"])
-async def test_malformed_accepted_response_blocks_outer_reexecution(use_async, stage):
+async def test_malformed_accepted_response_blocks_outer_reexecution(use_async, stage, recovery_model):
     server = AvatarServer(**{stage: httpx.Response(200, json={"object": "video"})})
     with pytest.raises(litellm.BadGatewayError) as caught:
-        await generate(server, use_async)
+        await generate(server, use_async, model=recovery_model)
     assert get_submission_outcome(caught.value) == "unknown"
     assert is_reexecution_blocked(caught.value)
     assert len(server.creates) == (1 if stage == "first" else 2)
@@ -489,7 +569,7 @@ async def test_malformed_accepted_response_blocks_outer_reexecution(use_async, s
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failure", ["review", "retry", "transport", "malformed"])
-async def test_recovery_in_middle_of_fallback_chain_stops_later_targets(monkeypatch, failure):
+async def test_recovery_in_middle_of_fallback_chain_stops_later_targets(monkeypatch, failure, recovery_model):
     from litellm.llms.base_llm.submission_utils import mark_submission_outcome
 
     response = {
@@ -513,12 +593,12 @@ async def test_recovery_in_middle_of_fallback_chain_stops_later_targets(monkeypa
                 "rejected",
             )
         if kwargs["model"] == "review":
-            return await generate(server, True)
+            return await generate(server, True, model=recovery_model)
         raise AssertionError("A recovery failure must never reach the last fallback")
 
     router = litellm.Router(
         model_list=[
-            {"model_name": model, "litellm_params": {"model": "toapis/seedance-2-5", "api_key": model}}
+            {"model_name": model, "litellm_params": {"model": recovery_model, "api_key": model}}
             for model in ("primary", "review", "last")
         ],
         num_retries=0,

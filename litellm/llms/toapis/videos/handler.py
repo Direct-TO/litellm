@@ -1,4 +1,4 @@
-"""One-shot recovery of Seedance 2.5's explicit virtual-person image rejection."""
+"""One-shot recovery of Seedance's explicit virtual-person image rejection."""
 
 import asyncio
 import hashlib
@@ -29,6 +29,7 @@ from ..common_utils import build_toapis_endpoint, parse_toapis_video_create_task
 
 REVIEW_TIMEOUT_SECONDS: Final = 120.0
 REVIEW_POLL_INTERVAL_SECONDS: Final = 5.0
+_AVATAR_RECOVERY_MODELS: Final = frozenset({"seedance-2", "seedance-2-fast", "seedance-2-mini", "seedance-2-5"})
 _OBJECT_ADAPTER: Final = TypeAdapter(dict[str, object])
 _IMAGES_ADAPTER: Final = TypeAdapter(list[object])
 _AVATAR_PATH: Final = "/v1/videos/doubao-seedance-2-0/private-avatar"
@@ -41,6 +42,10 @@ _IDEMPOTENCY_HEADERS: Final = frozenset({"idempotency-key", "x-idempotency-key"}
 
 class ToAPISVideoRecoveryError(BaseLLMException):
     """Keep submission provenance when crossing the generic HTTP error handler."""
+
+
+def supports_private_avatar_recovery(model: object) -> bool:
+    return isinstance(model, str) and model in _AVATAR_RECOVERY_MODELS
 
 
 def _error_nodes(value: object, depth: int = 0) -> tuple[Mapping[str, object], ...]:
@@ -60,7 +65,11 @@ def _error_nodes(value: object, depth: int = 0) -> tuple[Mapping[str, object], .
 
 
 def _rejected_images(response: httpx.Response, data: Mapping[str, object]) -> tuple[str, tuple[int, ...]] | None:
-    if response.status_code != 400 or data.get("model") != "seedance-2-5" or data.get("content") is not None:
+    if (
+        response.status_code != 400
+        or not supports_private_avatar_recovery(data.get("model"))
+        or data.get("content") is not None
+    ):
         return None
     nodes = _error_nodes(response.text)
     if any(

@@ -7123,7 +7123,7 @@ class BaseLLMHTTPHandler:
         Handles video generation requests.
         When _is_async=True, returns a coroutine instead of making the call directly.
         """
-        from litellm.llms.toapis.videos.handler import ToAPISVideoRecoveryError
+        from litellm.llms.toapis.videos.handler import ToAPISVideoRecoveryError, supports_private_avatar_recovery
         from litellm.llms.toapis.videos.handler import video_generation as toapis_video_generation
 
         if _is_async:
@@ -7215,7 +7215,7 @@ class BaseLLMHTTPHandler:
                     files=serialize_multipart_form_fields(data),
                     timeout=timeout,
                 )
-            elif custom_llm_provider == "toapis" and model == "seedance-2-5":
+            elif custom_llm_provider == "toapis" and supports_private_avatar_recovery(model):
                 response, data = toapis_video_generation(
                     client=sync_httpx_client,
                     data=data,  # pyright: ignore[reportUnknownArgumentType]  # BaseVideoConfig retains a bare-dict request contract
@@ -7271,6 +7271,7 @@ class BaseLLMHTTPHandler:
         """
         from litellm.llms.toapis.videos.handler import (
             ToAPISVideoRecoveryError,
+            supports_private_avatar_recovery,
         )
         from litellm.llms.toapis.videos.handler import (
             async_video_generation as toapis_async_video_generation,
@@ -7349,7 +7350,7 @@ class BaseLLMHTTPHandler:
                     files=serialize_multipart_form_fields(data),
                     timeout=timeout,
                 )
-            elif custom_llm_provider == "toapis" and model == "seedance-2-5":
+            elif custom_llm_provider == "toapis" and supports_private_avatar_recovery(model):
                 response, data = await toapis_async_video_generation(
                     client=async_httpx_client,
                     data=data,  # pyright: ignore[reportUnknownArgumentType]  # BaseVideoConfig retains a bare-dict request contract
