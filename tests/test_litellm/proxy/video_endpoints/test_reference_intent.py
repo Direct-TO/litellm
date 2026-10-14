@@ -332,7 +332,7 @@ def test_general_settings_validate_classifier_configuration():
 
 
 @pytest.mark.asyncio
-async def test_private_avatar_recovery_does_not_resubmit_automatic_intent(respx_mock, monkeypatch):
+async def test_person_rejection_does_not_resubmit_automatic_intent(respx_mock, monkeypatch):
     monkeypatch.setattr(litellm, "disable_aiohttp_transport", True)
     gateway = make_router()
     monkeypatch.setattr(gateway, "acompletion", classifier(decision()).acompletion)
@@ -351,6 +351,7 @@ async def test_private_avatar_recovery_does_not_resubmit_automatic_intent(respx_
     with pytest.raises(litellm.BadRequestError, match="PrivacyInformation"):
         await gateway.avideo_generation(**data)
     assert len(upstream.calls) == 1
+    assert json.loads(upstream.calls[0].request.content)["private_asset_review"] is True
 
 
 @pytest.mark.asyncio

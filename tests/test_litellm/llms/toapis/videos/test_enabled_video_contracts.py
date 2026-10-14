@@ -77,6 +77,8 @@ async def test_enabled_model_router_submits_documented_payload_once(
         references=references,
     )
     expected = {"model": model, "prompt": "contract fixture", **media}
+    if model in ("seedance-2", "seedance-2-fast", "seedance-2-mini", "seedance-2-5"):
+        expected["private_asset_review"] = True
     if model == "seedance-2-5":
         expected["video_operation"] = "generate"
     if provider == "zexapi":

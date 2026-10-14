@@ -30,6 +30,7 @@ from ..common_utils import (
 from .gateway_contract import GATEWAY_VIDEO_MODELS, map_gateway_video
 
 _ValidatedFileContent: TypeAlias = bytes | str | BytesIO | BufferedReader
+_PrivateAssetURLContainer: TypeAlias = str | dict[str, object] | tuple[object, ...]
 
 
 class _InputReference(BaseModel):
@@ -39,7 +40,15 @@ class _InputReference(BaseModel):
 
 
 _INPUT_REFERENCE_ADAPTER: Final = TypeAdapter(_InputReference)
+_PRIVATE_ASSET_URL_ADAPTER: Final[TypeAdapter[_PrivateAssetURLContainer]] = TypeAdapter(_PrivateAssetURLContainer)
 _REFERENCE_FORMAT_MARKER: Final = "_toapis_reference_format"
+_PRIVATE_ASSET_REVIEW_MODELS: Final = frozenset({"seedance-2", "seedance-2-fast", "seedance-2-mini", "seedance-2-5"})
+_PRIVATE_ASSET_MEDIA_FIELDS: Final = (
+    "image_with_roles",
+    "image_urls",
+    "video_with_roles",
+    "audio_with_roles",
+)
 
 
 class _VideoModelSpec(NamedTuple):
@@ -90,17 +99,21 @@ def _rewind_file_content(value: _ValidatedFileContent) -> _ValidatedFileContent:
 
 class ToAPISVideoConfig(OpenAIVideoConfig):
     def get_supported_openai_params(self, model: str) -> list[str]:  # mutable-ok: BaseVideoConfig requires a list
-        return [  # mutable-ok: BaseVideoConfig requires a concrete list
-            "extra_body",
-            "image",
-            "model",
-            "parameters",
-            "prompt",
-            "seconds",
-            "size",
-            "input_reference",
-            "extra_headers",
-        ] + (["resolution", "aspect_ratio", "references", "operation"] if model in GATEWAY_VIDEO_MODELS else [])
+        return (
+            [  # mutable-ok: BaseVideoConfig requires a concrete list
+                "extra_body",
+                "image",
+                "model",
+                "parameters",
+                "prompt",
+                "seconds",
+                "size",
+                "input_reference",
+                "extra_headers",
+            ]
+            + (["resolution", "aspect_ratio", "references", "operation"] if model in GATEWAY_VIDEO_MODELS else [])
+            + (["private_asset_review"] if model in _PRIVATE_ASSET_REVIEW_MODELS else [])
+        )
 
     def map_openai_params(
         self,
@@ -275,7 +288,48 @@ class ToAPISVideoConfig(OpenAIVideoConfig):
         request_data: Final = dict(  # mutable-ok: video HTTP handler requires a concrete JSON dict
             chain((("model", model), ("prompt", prompt)), forwarded_params)
         )
+        self._apply_private_asset_review(model, request_data)
         return request_data, (), api_base
+
+    @staticmethod
+    def _apply_private_asset_review(model: str, request_data: dict[str, object]) -> None:
+        if model not in _PRIVATE_ASSET_REVIEW_MODELS:
+            return
+        explicitly_requested = "private_asset_review" in request_data
+        review = request_data.get("private_asset_review")
+        if explicitly_requested and not isinstance(review, bool):
+            raise UnsupportedParamsError(
+                message="ToAPIs private_asset_review must be a boolean",
+                model=model,
+                llm_provider="toapis",
+            )
+        media_urls: Final = tuple(
+            url
+            for field in _PRIVATE_ASSET_MEDIA_FIELDS
+            for url in ToAPISVideoConfig._private_asset_urls(request_data.get(field))
+        )
+        has_legacy_asset: Final = any(url.strip().lower().startswith("asset://") for url in media_urls)
+        if review is True and has_legacy_asset:
+            raise UnsupportedParamsError(
+                message="ToAPIs private_asset_review=true cannot be combined with asset:// media; use the original URL",
+                model=model,
+                llm_provider="toapis",
+            )
+        has_source_url: Final = any(url.strip().lower().startswith(("http://", "https://")) for url in media_urls)
+        if not explicitly_requested and has_source_url and not has_legacy_asset:
+            request_data["private_asset_review"] = True
+
+    @staticmethod
+    def _private_asset_urls(value: object) -> tuple[str, ...]:
+        try:
+            container: Final = _PRIVATE_ASSET_URL_ADAPTER.validate_python(value)
+        except ValidationError:
+            return ()
+        if isinstance(container, str):
+            return (container,)
+        if isinstance(container, dict):
+            return ToAPISVideoConfig._private_asset_urls(container.get("url"))
+        return tuple(url for item in container for url in ToAPISVideoConfig._private_asset_urls(item))
 
     def transform_video_create_response(
         self,
