@@ -6,6 +6,7 @@ import pytest
 
 from litellm.llms.base_llm.chat.transformation import BaseLLMException
 from litellm.llms.base_llm.submission_utils import get_provider_task_id, get_submission_outcome
+from litellm.llms.custom_httpx.http_handler import HTTPHandler
 from litellm.llms.toapis.image_generation.handler import ToAPISImageGeneration
 from litellm.llms.toapis.image_generation.transformation import ToAPISImageGenerationConfig
 from litellm.types.utils import ImageResponse
@@ -65,6 +66,51 @@ class _AdvancingClock:
     def sleep(self, delay: float) -> None:
         self.sleeps.append(delay)
         self.now += delay
+
+
+@pytest.mark.parametrize("budget", [60, 600])
+@pytest.mark.parametrize("structured_timeout", [False, True])
+def test_toapis_image_generation_uses_total_configured_polling_budget(budget, structured_timeout):
+    clock = _AdvancingClock()
+    methods = []
+
+    def transport(request):
+        methods.append(request.method)
+        if request.method == "POST":
+            clock.sleep(40)
+            return _task_response("pending")
+        return _task_response(
+            "completed" if clock.now >= 350 else "pending",
+            result={"type": "image", "data": [{"url": "https://files.example/image.png"}]},
+        )
+
+    timeout = httpx.Timeout(budget) if structured_timeout else budget
+    handler = ToAPISImageGeneration(sync_sleep=clock.sleep, monotonic=clock.monotonic)
+    with httpx.Client(transport=httpx.MockTransport(transport)) as http:
+        client = HTTPHandler(timeout=timeout, client=http)
+        args = dict(
+            model="gpt-image-2",
+            prompt="test",
+            optional_params={},
+            litellm_params={},
+            logging_obj=Mock(),
+            timeout=timeout,
+            api_key="test-key",
+            client=client,
+        )
+        if budget == 600:
+            result = handler.image_generation(**args)
+            assert result.data[0].url == "https://files.example/image.png"
+            assert clock.now == 350
+        else:
+            with pytest.raises(BaseLLMException) as caught:
+                handler.image_generation(**args)
+            assert caught.value.status_code == 408
+            assert get_provider_task_id(caught.value) == "task_img_123"
+            assert get_submission_outcome(caught.value) == "accepted"
+            assert clock.now == 55
+    assert methods.count("POST") == 1
+    assert set(methods) == {"POST", "GET"}
 
 
 def test_toapis_sync_polling_normalizes_pending_status_and_result():

@@ -2,6 +2,7 @@ import asyncio
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from itertools import chain
+from math import isfinite
 from types import MappingProxyType
 from typing import Final, NamedTuple, NoReturn
 
@@ -79,6 +80,8 @@ class ToAPISImageGeneration:
                 extra_body=extra_body,
                 client=client if isinstance(client, AsyncHTTPHandler) else None,
             )
+        started_at: Final = self._monotonic()
+        polling_budget: Final = self._polling_budget(timeout)
         initial_prepared: Final = self._prepare_request(
             model, prompt, optional_params, litellm_params, api_key, extra_headers, extra_body
         )
@@ -108,6 +111,10 @@ class ToAPISImageGeneration:
             prepared.headers,
             sync_client,
             timeout,
+            max_wait=max(
+                0.0,
+                polling_budget - (self._monotonic() - started_at) - min(5.0, polling_budget / 10),
+            ),
         )
         return self._to_image_response(model, final_response, prepared, optional_params, logging_obj)
 
@@ -124,6 +131,8 @@ class ToAPISImageGeneration:
         extra_body: Mapping[str, object] | None = None,
         client: AsyncHTTPHandler | None = None,
     ) -> ImageResponse:
+        started_at: Final = self._monotonic()
+        polling_budget: Final = self._polling_budget(timeout)
         initial_prepared: Final = self._prepare_request(
             model, prompt, optional_params, litellm_params, api_key, extra_headers, extra_body
         )
@@ -160,6 +169,10 @@ class ToAPISImageGeneration:
             prepared.headers,
             async_client,
             timeout,
+            max_wait=max(
+                0.0,
+                polling_budget - (self._monotonic() - started_at) - min(5.0, polling_budget / 10),
+            ),
         )
         return self._to_image_response(model, final_response, prepared, optional_params, logging_obj)
 
@@ -400,6 +413,13 @@ class ToAPISImageGeneration:
             return
         message: Final = f"{task.error.code}: {task.error.message}" if task.error else "Image generation failed"
         raise BaseLLMException(status_code=500, message=message, headers=headers)
+
+    @staticmethod
+    def _polling_budget(timeout: float | httpx.Timeout | None) -> float:
+        value: Final = timeout.read if isinstance(timeout, httpx.Timeout) else timeout
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and isfinite(value) and value > 0:
+            return float(value)
+        return DEFAULT_MAX_POLLING_TIME
 
     @staticmethod
     def _raise_timeout() -> NoReturn:

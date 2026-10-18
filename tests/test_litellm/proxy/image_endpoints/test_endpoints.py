@@ -31,7 +31,7 @@ async def test_image_failure_exposes_only_adapter_submission_provenance(monkeypa
     async def fail(**kwargs):
         error = litellm.APIConnectionError(message="Cannot connect to host", model="gpt-image-2", llm_provider="toapis")
         if outcome:
-            mark_submission_outcome(error, outcome)
+            mark_submission_outcome(error, outcome, provider_task_id="task/with query?")
         raise error
 
     async def ignore(**kwargs):
@@ -40,16 +40,26 @@ async def test_image_failure_exposes_only_adapter_submission_provenance(monkeypa
     monkeypatch.setattr("litellm.proxy.proxy_server.add_litellm_data_to_request", passthrough)
     monkeypatch.setattr("litellm.proxy.proxy_server.general_settings", {})
     monkeypatch.setattr("litellm.proxy.proxy_server.llm_router", None)
-    monkeypatch.setattr("litellm.proxy.proxy_server.proxy_logging_obj", SimpleNamespace(pre_call_hook=passthrough, post_call_failure_hook=ignore))
+    monkeypatch.setattr(
+        "litellm.proxy.proxy_server.proxy_logging_obj",
+        SimpleNamespace(pre_call_hook=passthrough, post_call_failure_hook=ignore),
+    )
     monkeypatch.setattr(endpoints, "route_request", fail)
 
     async def receive():
-        return {"type": "http.request", "body": orjson.dumps({"model": "gpt-image-2", "prompt": "test"}), "more_body": False}
+        return {
+            "type": "http.request",
+            "body": orjson.dumps({"model": "gpt-image-2", "prompt": "test"}),
+            "more_body": False,
+        }
 
     request = Request({"type": "http", "method": "POST", "path": "/v1/images/generations", "headers": []}, receive)
     with pytest.raises(ProxyException) as caught:
         await endpoints.image_generation(request, Response(), UserAPIKeyAuth())
     assert caught.value.headers.get("x-litellm-submission-outcome") == outcome
+    assert caught.value.headers.get("x-litellm-provider-task-id") == (
+        "task/with query?" if outcome == "accepted" else None
+    )
 
 
 def test_generation_model_is_required_when_no_server_default_is_configured():

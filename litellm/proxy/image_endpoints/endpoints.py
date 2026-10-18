@@ -14,7 +14,7 @@ from litellm._logging import verbose_proxy_logger
 from litellm.litellm_core_utils.prompt_templates.common_utils import (
     get_str_from_messages,
 )
-from litellm.llms.base_llm.submission_utils import get_submission_outcome
+from litellm.llms.base_llm.submission_utils import get_provider_task_id, get_submission_outcome
 from litellm.proxy._types import *
 from litellm.proxy.auth.user_api_key_auth import UserAPIKeyAuth, user_api_key_auth
 from litellm.proxy.common_request_processing import ProxyBaseLLMRequestProcessing, require_resolved_model
@@ -207,13 +207,27 @@ async def image_generation(
         else:
             error_msg: Final = f"{e}"
             submission_outcome = get_submission_outcome(e)
+            provider_task_id: Final = get_provider_task_id(e)
             raise ProxyException(
                 message=getattr(e, "message", error_msg),
                 type=getattr(e, "type", "None"),
                 param=getattr(e, "param", "None"),
                 openai_code=getattr(e, "code", None),
                 code=getattr(e, "status_code", 500),
-                headers={"x-litellm-submission-outcome": submission_outcome} if submission_outcome else None,
+                headers={
+                    "x-litellm-submission-outcome": submission_outcome,
+                    **(
+                        {"x-litellm-provider-task-id": provider_task_id}
+                        if submission_outcome == "accepted"
+                        and provider_task_id
+                        and len(provider_task_id) <= 512
+                        and provider_task_id.strip() == provider_task_id
+                        and all(32 <= ord(char) < 127 for char in provider_task_id)
+                        else {}
+                    ),
+                }
+                if submission_outcome
+                else None,
             )
 
 
