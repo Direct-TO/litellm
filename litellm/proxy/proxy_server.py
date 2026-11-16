@@ -14177,6 +14177,7 @@ async def model_info_v1(
         description="Filter models by team ID. Returns models with direct_access=True or teamId in access_via_team_ids",
     ),
     healthy_only: bool | None = False,
+    supplier_pricing_model: str | None = None,
 ):
     """
     Provides more info about each model in /models, including config.yaml descriptions (except api key and api base)
@@ -14366,7 +14367,17 @@ async def model_info_v1(
         general_settings=general_settings,
         llm_router=llm_router,
     )
-    visible_models: Final = [model for model in all_models if model.get("model_name") not in hidden_names]
+    visible_models = [model for model in all_models if model.get("model_name") not in hidden_names]
+
+    if supplier_pricing_model is not None:
+        from litellm.proxy.supplier_pricing import attach_supplier_pricing
+
+        if not supplier_pricing_model.strip() or len(supplier_pricing_model) > 255:
+            raise HTTPException(status_code=400, detail="A single model name is required for supplier pricing")
+        visible_models = [model for model in visible_models if model.get("model_name") == supplier_pricing_model]
+        if len(visible_models) > 20:
+            raise HTTPException(status_code=400, detail="Too many deployments for supplier pricing")
+        visible_models = await attach_supplier_pricing(visible_models, llm_router, team_id=user_api_key_dict.team_id)
 
     verbose_proxy_logger.debug("all_models: %s", visible_models)
     return {"data": visible_models}

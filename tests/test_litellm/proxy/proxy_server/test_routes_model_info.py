@@ -9,7 +9,7 @@ Pins (PR2):
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -20,6 +20,33 @@ from .conftest import normalize  # type: ignore[import-not-found]
 # ---------------------------------------------------------------------------
 # GET /v2/model/info
 # ---------------------------------------------------------------------------
+
+
+def test_supplier_pricing_is_opt_in_and_only_receives_visible_models(client, auth_as, empty_router, monkeypatch):
+    from litellm.proxy import supplier_pricing
+    from litellm.proxy._types import LitellmUserRoles
+
+    empty_router.model_list = [
+        {"model_name": name, "litellm_params": {"model": "toapis/" + name}, "model_info": {"id": name}}
+        for name in ["video", "other"]
+    ]
+    empty_router.get_model_list_from_model_alias.return_value = []
+    empty_router.get_model_access_groups.return_value = {}
+    empty_router.get_model_names.return_value = ["video", "other"]
+    monkeypatch.setattr(proxy_server, "user_model", None)
+    monkeypatch.setattr(proxy_server, "prisma_client", None)
+    monkeypatch.setattr(proxy_server, "_enrich_model_info_with_litellm_data", lambda model, llm_router: model)
+    attach = AsyncMock(side_effect=lambda models, *args, **kwargs: models)
+    monkeypatch.setattr(supplier_pricing, "attach_supplier_pricing", attach)
+    with auth_as(models=["video"], role=LitellmUserRoles.INTERNAL_USER):
+        assert client.get("/model/info").status_code == 200
+        attach.assert_not_called()
+        response = client.get("/model/info", params={"supplier_pricing_model": "video"})
+        assert response.status_code == 200
+        assert [row["model_name"] for row in attach.call_args.args[0]] == ["video"]
+        response = client.get("/model/info", params={"supplier_pricing_model": "other"})
+        assert response.json() == {"data": []}
+        assert attach.call_args.args[0] == []
 
 
 @pytest.fixture
