@@ -60,6 +60,8 @@ class ToAPISTaskResponse(BaseModel):
     expires_at: int | None = None
     result: ToAPISTaskResult | None = None
     error: ToAPISTaskError | None = None
+    usage: dict[str, object] | None = None
+    billing: dict[str, object] | None = None
 
 
 class ToAPISImageUploadData(BaseModel):

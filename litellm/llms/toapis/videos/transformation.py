@@ -408,4 +408,6 @@ class ToAPISVideoConfig(OpenAIVideoConfig):
             progress=task.progress,
             model=task.model or request_model,
             output_url=output_url,
+            provider_usage=task.usage,
+            provider_billing=task.billing,
         )

@@ -15,6 +15,44 @@ from litellm.types.videos.utils import decode_video_id_with_provider
 _SEEDANCE_PRIVATE_REVIEW_MODELS = ["seedance-2", "seedance-2-fast", "seedance-2-mini", "seedance-2-5"]
 
 
+@pytest.mark.parametrize("billing", [None, {"status": "pending"}, {"status": "settled", "credits": "87.3", "cost_usd": "0.4365"}, {"status": "refunded", "credits": "0", "cost_usd": "0"}])
+def test_video_status_preserves_supplier_usage_and_confirmed_charge_without_inventing_zero(billing):
+    usage = {"charge_type": "per_token", "billed_tokens": 87300, "total_tokens": 87300}
+    response = httpx.Response(200, json={
+        "id": "original-video", "object": "generation.task", "model": "seedance-2", "status": "completed",
+        "result": {"type": "video", "data": [{"url": "https://cdn.example/result.mp4"}]},
+        "usage": usage, **({"billing": billing} if billing is not None else {}),
+    }, request=httpx.Request("GET", "https://toapis.com/v1/videos/generations/original-video"))
+    video = ToAPISVideoConfig().transform_video_status_retrieve_response(response, Mock())
+    assert video.output_url == "https://cdn.example/result.mp4"
+    assert video.usage is None
+    assert video.provider_usage == usage
+    assert video.provider_billing == billing
+    assert video.model_dump()["provider_billing"] == billing
+
+
+def test_repeated_video_queries_do_not_bill_supplier_usage_as_new_token_consumption():
+    model = "toapis/compat-billing-fixture"
+    litellm.register_model({model: {
+        "litellm_provider": "toapis", "mode": "video", "max_tokens": 1000000,
+        "input_cost_per_token": 0.000001, "output_cost_per_token": 0.000002,
+    }})
+    response = httpx.Response(200, json={
+        "id": "same-original-task", "object": "generation.task", "model": model, "status": "completed",
+        "result": {"type": "video", "data": [{"url": "https://cdn.example/result.mp4"}]},
+        "usage": {"completion_tokens": 87300, "total_tokens": 87300},
+        "billing": {"status": "settled", "credits": "87.3", "cost_usd": "0.4365"},
+    }, request=httpx.Request("GET", "https://toapis.com/v1/videos/generations/same-original-task"))
+    try:
+        for _ in range(3):
+            video = ToAPISVideoConfig().transform_video_status_retrieve_response(response, Mock())
+            assert video.provider_usage == {"completion_tokens": 87300, "total_tokens": 87300}
+            assert video.provider_billing["cost_usd"] == "0.4365"
+            assert litellm.completion_cost(completion_response=video, model=model, custom_llm_provider="toapis", call_type="video_retrieve") == 0
+    finally:
+        litellm.model_cost.pop(model, None)
+
+
 def _create_request_data(model, params):
     return ToAPISVideoConfig().transform_video_create_request(
         model=model,

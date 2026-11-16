@@ -23,6 +23,10 @@ class VideoObject(BaseModel):
     model: str | None = None
     output_url: str | None = None
     usage: dict[str, Any] | None = None
+    # Audit-only supplier usage. Do not turn polling a completed task into a new billable call.
+    provider_usage: Mapping[str, object] | None = None
+    # Supplier-confirmed charge, distinct from LiteLLM's own pricing calculation.
+    provider_billing: Mapping[str, object] | None = None
     _hidden_params: dict[str, Any] = {}
 
     def __contains__(self, key) -> bool:
