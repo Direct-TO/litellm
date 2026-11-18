@@ -4,11 +4,14 @@ from typing import Literal, TypeAlias
 
 from typing_extensions import NotRequired, ReadOnly, TypedDict
 
+from litellm.types.videos.constraints import VideoGenerationConstraints
+
 ModelCapability: TypeAlias = Literal["text", "image", "video", "audio"]
 
 
 class ModelInfoMetadata(TypedDict):
     fallbacks: list[str]
+    generation_constraints: NotRequired[VideoGenerationConstraints]
 
 
 class ModelInfoResponse(TypedDict):

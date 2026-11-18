@@ -9886,7 +9886,7 @@ async def model_list(
     This is just for compatibility with openai projects like aider.
 
     Query Parameters:
-    - include_metadata: Include additional metadata in the response with fallback information
+    - include_metadata: Include fallback information and declared video generation parameter combinations
     - fallback_type: Type of fallbacks to include ("general", "context_window", "content_policy")
                     Defaults to "general" when include_metadata=true
     - scope: Optional scope parameter. Currently only accepts "expand".
@@ -10004,6 +10004,8 @@ async def model_list(
                 model_id=lookup_id,
                 provider="openai",
                 include_metadata=include_metadata or False,
+                team_id=user_api_key_dict.team_id or team_id,
+                caller=user_api_key_dict,
                 fallback_type=fallback_type,
                 llm_router=llm_router,
             )
@@ -10049,6 +10051,8 @@ async def model_list(
             model_id=lookup_id,
             provider="openai",
             include_metadata=include_metadata or False,
+            team_id=user_api_key_dict.team_id or team_id,
+            caller=user_api_key_dict,
             fallback_type=fallback_type,
             llm_router=llm_router,
         )

@@ -3,7 +3,8 @@ from io import BufferedReader, BytesIO
 from itertools import chain
 from math import gcd
 from types import MappingProxyType
-from typing import Final, Literal, NamedTuple, TypeAlias, cast
+from typing import Final, Literal, NamedTuple, NoReturn, TypeAlias, cast
+from urllib.parse import urlsplit
 
 import httpx
 from httpx._types import RequestFiles
@@ -16,16 +17,18 @@ from litellm.llms.base_llm.videos.transformation import normalize_video_task_res
 from litellm.llms.openai.videos.transformation import OpenAIVideoConfig
 from litellm.types.router import GenericLiteLLMParams
 from litellm.types.videos.main import VideoCreateOptionalRequestParams, VideoObject
-from litellm.types.videos.utils import encode_video_id_with_provider
+from litellm.types.videos.utils import decode_video_id_with_provider, encode_video_id_with_provider
 from litellm.videos.contract import VIDEO_CONTRACT_FIELDS
 
 from ..common_utils import (
     ToAPISTaskResponse,
     build_toapis_endpoint,
+    get_toapis_api_base,
     get_toapis_api_key,
     parse_toapis_image_upload,
     parse_toapis_task,
     parse_toapis_video_create_task,
+    parse_toapis_video_status_task,
 )
 from .gateway_contract import GATEWAY_VIDEO_MODELS, map_gateway_video
 
@@ -79,6 +82,7 @@ _VIDEO_MODEL_SPECS: Final[Mapping[str, _VideoModelSpec]] = MappingProxyType(
         "grok-video-1.0": _VideoModelSpec("aspect_ratio", "image"),
         "grok-video-1.5": _VideoModelSpec("aspect_ratio", "image"),
         "gemini-omni-flash": _VideoModelSpec("aspect_ratio", "image_urls"),
+        "gemini-omni-1.2-flash-preview": _VideoModelSpec("aspect_ratio", "image_urls"),
         "gemini-omni-flash-preview-official": _VideoModelSpec("aspect_ratio", "image_urls"),
         "veo3.1-fast": _VideoModelSpec("aspect_ratio", "image_urls"),
         "veo3.1-quality": _VideoModelSpec("aspect_ratio", "image_urls"),
@@ -95,6 +99,14 @@ def _rewind_file_content(value: _ValidatedFileContent) -> _ValidatedFileContent:
         return value
     value.seek(0)
     return value
+
+
+def _video_api_base(api_base: str | None) -> str:
+    resolved = get_toapis_api_base(api_base).rstrip("/")
+    for suffix in ("/videos/generations", "/videos"):
+        if resolved.endswith(f"/v1{suffix}"):
+            return resolved.removesuffix(suffix)
+    return resolved
 
 
 class ToAPISVideoConfig(OpenAIVideoConfig):
@@ -176,7 +188,8 @@ class ToAPISVideoConfig(OpenAIVideoConfig):
         }
 
     def get_complete_url(self, model: str, api_base: str | None, litellm_params: Mapping[str, object]) -> str:
-        return build_toapis_endpoint(api_base, "/v1/videos/generations")
+        endpoint = "/v1/videos" if model == "gemini-omni-1.2-flash-preview" else "/v1/videos/generations"
+        return build_toapis_endpoint(_video_api_base(api_base), endpoint)
 
     def use_multipart_form_data(self) -> bool:
         return False
@@ -201,6 +214,8 @@ class ToAPISVideoConfig(OpenAIVideoConfig):
             or video_create_optional_request_params.get("image_with_roles") is not None
             or video_create_optional_request_params.get("reference_images") is not None
             or video_create_optional_request_params.get("image") is not None
+            or video_create_optional_request_params.get("first_image_url") is not None
+            or video_create_optional_request_params.get("last_image_url") is not None
         ):
             raise ValueError("ToAPIs video generation cannot combine input_reference with image URL fields")
         metadata: Final = video_create_optional_request_params.get("metadata")
@@ -220,7 +235,7 @@ class ToAPISVideoConfig(OpenAIVideoConfig):
         )
         upload_files: Final[RequestFiles] = (("file", (filename, upload_content, content_type)),)
         return (
-            build_toapis_endpoint(litellm_params.api_base, "/v1/uploads/images"),
+            build_toapis_endpoint(_video_api_base(litellm_params.api_base), "/v1/uploads/images"),
             upload_headers,
             MappingProxyType({"purpose": "generation"}),
             upload_files,
@@ -289,7 +304,66 @@ class ToAPISVideoConfig(OpenAIVideoConfig):
             chain((("model", model), ("prompt", prompt)), forwarded_params)
         )
         self._apply_private_asset_review(model, request_data)
+        if model == "gemini-omni-1.2-flash-preview":
+            self._validate_omni_1_2_request(model, request_data)
         return request_data, (), api_base
+
+    @staticmethod
+    def _validate_omni_1_2_request(model: str, request_data: dict[str, object]) -> None:
+        def reject(message: str) -> NoReturn:
+            raise UnsupportedParamsError(
+                message=f"ToAPIs model={model!r}: {message}", model=model, llm_provider="toapis"
+            )
+
+        duration = request_data.get("duration")
+        if duration is not None and (
+            isinstance(duration, bool) or not isinstance(duration, int) or not 4 <= duration <= 15
+        ):
+            reject("duration must be an integer from 4 to 15 seconds")
+        if request_data.get("resolution") not in (None, "720p"):
+            reject("resolution must be 720p")
+        if request_data.get("aspect_ratio") not in (None, "16:9", "9:16"):
+            reject("aspect_ratio must be 16:9 or 9:16")
+        if any(
+            request_data.get(key) is not None
+            for key in (
+                "video",
+                "videos",
+                "video_url",
+                "video_urls",
+                "video_list",
+                "video_with_roles",
+                "input_video",
+                "url",
+            )
+        ):
+            reject("video inputs are not supported")
+        if any(request_data.get(key) is not None for key in ("audio", "audio_url", "audio_urls", "audio_with_roles")):
+            reject("audio references are not supported")
+        if any(
+            request_data.get(key) is not None
+            for key in ("image", "images", "image_with_roles", "reference_images", "metadata", "parameters")
+        ):
+            reject("use image_urls, first_image_url and last_image_url for image inputs")
+        image_urls = request_data.get("image_urls")
+        if image_urls is not None and (not isinstance(image_urls, list) or len(image_urls) > 5):
+            reject("image_urls must be an array of at most 5 reference images")
+        urls: Final = tuple(cast(list[object], image_urls)) if isinstance(image_urls, list) else ()
+        frames: Final = tuple(
+            request_data[key] for key in ("first_image_url", "last_image_url") if request_data.get(key) is not None
+        )
+        for url in chain(urls, frames):
+            if not isinstance(url, str):
+                reject("image URLs must be public absolute HTTP(S) URLs without credentials")
+            parsed = urlsplit(url)
+            if parsed.scheme not in ("http", "https") or not parsed.netloc or parsed.username or parsed.password:
+                reject("image URLs must be public absolute HTTP(S) URLs without credentials")
+        # The ordinary Omni 1.2 route has no audio switch. Accept the caller's
+        # default audio-enabled mode without forwarding an undocumented field.
+        if "generate_audio" in request_data:
+            if request_data["generate_audio"] is not True:
+                reject("generate_audio only accepts true; this route has no documented mute control")
+            request_data.pop("generate_audio")
 
     @staticmethod
     def _apply_private_asset_review(model: str, request_data: dict[str, object]) -> None:
@@ -347,7 +421,32 @@ class ToAPISVideoConfig(OpenAIVideoConfig):
         logging_obj: LiteLLMLoggingObj,
         custom_llm_provider: str | None = None,
     ) -> VideoObject:
-        return self._transform_task(parse_toapis_task(raw_response), custom_llm_provider, None)
+        request_model = None
+        try:
+            request_path = raw_response.request.url.raw_path.split(b"?", 1)[0]
+        except RuntimeError:
+            request_path = b""
+        # Only Omni 1.2 uses this route. Keep its model marker when a pending
+        # response omits model, so the returned ID remains safe to poll again.
+        if request_path.rsplit(b"/", 1)[0].endswith(b"/v1/videos"):
+            request_model = "gemini-omni-1.2-flash-preview"
+        task = (
+            parse_toapis_video_status_task(raw_response)
+            if request_model == "gemini-omni-1.2-flash-preview"
+            else parse_toapis_task(raw_response)
+        )
+        return self._transform_task(task, custom_llm_provider, request_model)
+
+    def transform_video_status_retrieve_request(
+        self,
+        video_id: str,
+        api_base: str,
+        litellm_params: GenericLiteLLMParams,
+        headers: dict[str, str],
+    ) -> tuple[str, dict[str, object]]:
+        if decode_video_id_with_provider(video_id).get("model_id") == "gemini-omni-1.2-flash-preview":
+            api_base = build_toapis_endpoint(_video_api_base(litellm_params.api_base or api_base), "/v1/videos")
+        return super().transform_video_status_retrieve_request(video_id, api_base, litellm_params, headers)
 
     @staticmethod
     def _duration(seconds: str | None) -> int | str | None:
@@ -393,7 +492,7 @@ class ToAPISVideoConfig(OpenAIVideoConfig):
             require_absolute_output_url=True,
         )
         task_id: Final = (
-            encode_video_id_with_provider(task.id, custom_llm_provider, request_model)
+            encode_video_id_with_provider(task.id, custom_llm_provider, request_model or task.model)
             if custom_llm_provider is not None
             else task.id
         )

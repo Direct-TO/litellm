@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from typing_extensions import Protocol, ReadOnly, Required, TypedDict, runtime_checkable
 
 from litellm._uuid import uuid
+from litellm.types.videos.constraints import VideoGenerationLimits
 
 if TYPE_CHECKING:
     from litellm.router import Router
@@ -194,6 +195,7 @@ def _as_utc(value: datetime.datetime | None) -> datetime.datetime | None:
 
 
 class ModelInfo(MirroredPricingParams):
+    video_generation_limits: VideoGenerationLimits | None = None
     id: str | None  # Allow id to be optional on input, but it will always be present as a str in the model instance
     db_model: bool = False  # used for proxy - to separate models which are stored in the db vs. config.
     updated_at: datetime.datetime | None = None

@@ -7284,6 +7284,8 @@ def create_model_info_response(
     fallback_type: str | None = None,
     llm_router: Optional["Router"] = None,
     get_model_info: Callable[[str], ModelInfo] = litellm.get_model_info,
+    team_id: str | None = None,
+    caller: UserAPIKeyAuth | None = None,
 ) -> ModelInfoResponse:
     """
     Create a standardized OpenAI-compatible model object.
@@ -7358,7 +7360,12 @@ def create_model_info_response(
         llm_router=llm_router,
         fallback_type=effective_fallback_type,
     )
-    return {**base, "metadata": {"fallbacks": fallbacks}}
+    base["metadata"] = {"fallbacks": fallbacks}
+    if capability == "video" and llm_router is not None:
+        constraints = llm_router.get_video_generation_constraints(model_id, team_id, caller)
+        if constraints is not None:
+            base["metadata"]["generation_constraints"] = constraints
+    return base
 
 
 def validate_model_access(

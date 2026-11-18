@@ -1,6 +1,6 @@
 # 光盒视频通道
 
-接口依据：光盒 API 文档 https://gc.aitoken.name/#/api-docs，以及 2026-09-16 使用测试 Key 读取的 `/models`。
+接口依据：光盒 API 文档 https://gc.aitoken.name/#/api-docs，以及 2026-09-16 的 `/models`；Fast 国内key100的规格另于 2026-11-17 使用线上同一渠道凭据核实。
 
 默认 API base 为 `https://newapi.aitoken.name/api/inspiration-waterfall/v1`。使用 `GUANGHE_API_KEY`，可通过 `GUANGHE_API_BASE` 或部署的 `api_base` 覆盖地址。凭据只从运行环境读取。
 
@@ -8,10 +8,12 @@
 | --- | --- | --- | --- |
 | seedance-2 | seedance2.0_企业折扣 | 480p/720p/1080p | 4–15 秒或 -1 |
 | seedance-2-5 | seedance2.5_企业折 | 480p/720p/1080p | 4–30 秒或 -1 |
-| seedance-2-fast | seedance2.0-fast（企业折扣） | 480p/720p | 4–15 秒或 -1 |
+| seedance-2-fast | seedance2.0-fast（国内key100） | 480p/720p | 4–15 秒或 -1 |
 | seedance-2-mini | seedance2.0-mini（企业折扣） | 480p/720p | 4–15 秒或 -1 |
 
 四个对外名称分别是独立模型组，每组包含光盒 `order: 1` 和 ToAPIs `order: 2`。先排除暂停、冷却和不支持本次参数的部署，再按 order 选择；光盒可用且参数兼容时优先。旧的 `guanghe-seedance-*` 单独名称不再出现在默认配置中，供应商前缀只保留在内部部署模型。已生成任务的状态查询和下载根据任务 ID 中的供应商与模型筛选部署，不会重新按优先级切到另一家；找不到原供应商时明确报错。
+
+Fast 的旧 `seedance2.0-fast（企业折扣）` 当前已不在供应商可用目录。迁移时保留旧部署的 ID、模型名、地址和凭据，将 `model_info.supported_endpoints` 设为空列表、`order` 设为99，并开启 `disable_background_health_check`，用于已有任务的状态查询与下载。适配器同时在创建参数校验阶段拒绝旧模型，保证直接SDK调用或同步路由也不会向已退休模型提交；读取不经过这项创建校验。不要将旧部署标为 `blocked`，该标记也会阻止历史读取。新国内key100部署继续使用公开组名 `seedance-2-fast`、`order: 1`，ToAPIs 保持备用。此只读旧部署不计入可创建任务的两个渠道。
 
 沿用现有媒体切换规则：只有明确拒绝且符合 403/429/503 策略时才尝试备用；任务已受理、结果未知或人像内容拒绝不会自动再次生成。此配置修改不等于线上 DB Models 已更新。
 
@@ -19,9 +21,9 @@
 
 LiteLLM 接受 `seconds`、`resolution`、`aspect_ratio`、`references`，转换为 `POST /video/tasks` 的 `{model_id, prompt, params}`。支持 16:9、9:16、1:1、4:3、3:4、21:9；比例省略映射为 adaptive。时长默认 4 秒，分辨率默认 720p。
 
-声音开关：四条通道的真实验收输出都默认包含音轨，适配器将星拓造境的 `generate_audio: true` 对应到此默认行为，不向光盒发送其 schema 未声明的声音字段。光盒没有文档确认的静音开关，显式 `generate_audio: false` 会被光盒预检拒绝，由同组支持该参数的 ToAPIs 服务；不会静默忽略静音要求。
+声音开关：国内key100声明原生 `generate_audio` 布尔参数，适配器将 `true` 和 `false` 原样传递，非布尔值在提交前拒绝。省略该参数时不补值。其余旧通道的已验收输出默认包含音轨，适配器将星拓造境的 `generate_audio: true` 对应到此默认行为，不发送其 schema 未声明的声音字段；显式 `false` 仍被这些旧通道预检拒绝，由同组支持静音的 ToAPIs 服务。
 
-普通参考按类型映射为 `imageUrls`、`videoUrls`、`audioUrls`，保留各类型内顺序。上限分别是 30/10/10。首尾帧映射为 `firstFrameUrl`、`lastFrameUrl`，不能混用普通参考。拒绝像素尺寸、未经声明的模型及原生字段覆盖，不静默丢弃参考或降级分辨率。
+普通参考按类型映射为 `imageUrls`、`videoUrls`、`audioUrls`，保留各类型内顺序。国内key100的上限分别是 9/3/3，其他既有模型保持 30/10/10；超限在提交前拒绝。首尾帧映射为 `firstFrameUrl`、`lastFrameUrl`，不能混用普通参考。拒绝像素尺寸、未经声明的模型及原生字段覆盖，不静默丢弃参考或降级分辨率。国内key100在供应商网页中的默认值为5秒/480p/16:9；网关仍保持已有4秒/720p/adaptive默认行为，调用方显式参数优先。
 
 ```json
 {
@@ -58,6 +60,12 @@ LiteLLM 接受 `seconds`、`resolution`、`aspect_ratio`、`references`，转换
 每次创建自动携带 UUID `Idempotency-Key`，也可通过 `extra_headers` 指定。底层连接重发沿用相同键；不在适配器内重新创建任务。超时、5xx、无效响应或已经有任务 ID 后的错误标记为 unknown/accepted，阻止 Router 重试或跨部署故障转移。部署配置 `num_retries: 0`。
 
 `credits_cost` 仅保留为供应商元数据，没有可信货币换算时不注册虚假的零价格。创建成功、审核通过、视频生成成功和真实输出规格需要分别验证。
+
+## 2026-11-17 Fast 国内key100验证
+
+迁移前使用同一渠道凭据直连创建一次5秒、480p、16:9、`generate_audio: true`的文生视频，返回任务ID后轮询至 `success`，供应商记录为16积分。下载成片的视频轨时长5.0417秒、864×496、24fps，包含非静音AAC立体声音轨。
+
+部署并更新线上DB后，通过公开 `seedance-2-fast` 和 `/v1/videos` 再提交一次5秒、480p、16:9、`generate_audio: false`的文生视频。响应任务ID明确编码国内key100，约131.5秒轮询到 `completed`，`/content` 下载HTTP 200；文件为5.0417秒、864×496、24fps，无音频轨。线上同时验证旧企业折扣任务及新直连任务均可查询为 `completed`。相关220项回归通过，覆盖参数透传、素材数量边界、新建与旧读取隔离、备用及配置目录。首尾帧、多模态参考和其他规格仍只有契约及模拟回归验证，不代表均已真实生成验收。
 
 ## 2026-09-16 人像视频拒绝复现与虚拟资产接口边界
 

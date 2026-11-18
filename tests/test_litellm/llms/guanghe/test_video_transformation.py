@@ -9,7 +9,9 @@ from litellm.llms.base_llm.chat.transformation import BaseLLMException
 from litellm.llms.base_llm.submission_utils import get_submission_outcome
 from litellm.llms.guanghe.videos.transformation import (
     DEFAULT_API_BASE,
+    FAST_KEY100_MODEL,
     MODEL_RESOLUTIONS,
+    RETIRED_FAST_MODEL,
     GuangheVideoConfig,
     build_endpoint,
 )
@@ -32,7 +34,7 @@ def isolate_transport(monkeypatch, respx_mock):
     respx_mock.post(BASE + "/files/upload").respond(200, json={"success": True, "data": {"url": REF["url"]}})
 
 
-@pytest.mark.parametrize("model", MODEL_RESOLUTIONS)
+@pytest.mark.parametrize("model", [model for model in MODEL_RESOLUTIONS if model != RETIRED_FAST_MODEL])
 @pytest.mark.parametrize("asynchronous", [False, True])
 async def test_public_create_contract(model, asynchronous, respx_mock):
     route = respx_mock.post(BASE + "/video/tasks").respond(
@@ -288,3 +290,99 @@ def test_download_rejects_error_pages(mime):
         GuangheVideoConfig().transform_video_content_response(
             httpx.Response(200, content=b"error page", headers={"Content-Type": mime}), Mock()
         )
+
+
+@pytest.mark.parametrize("generate_audio", [False, True])
+@pytest.mark.parametrize("asynchronous", [False, True])
+async def test_key100_audio_toggle_reaches_provider(generate_audio, asynchronous, respx_mock):
+    create = respx_mock.post(BASE + "/video/tasks").respond(
+        202, json={"success": True, "data": {"job_id": "key100-task", "status": "accepting"}}
+    )
+    kwargs = dict(
+        model="guanghe/" + FAST_KEY100_MODEL,
+        prompt="A red paper boat drifts on water.",
+        seconds="5",
+        resolution="480p",
+        aspect_ratio="16:9",
+        generate_audio=generate_audio,
+        api_key="test-key",
+        api_base=BASE,
+    )
+    result = await litellm.avideo_generation(**kwargs) if asynchronous else litellm.video_generation(**kwargs)
+    assert result.status == "queued"
+    assert json.loads(create.calls[0].request.content) == {
+        "model_id": FAST_KEY100_MODEL,
+        "prompt": kwargs["prompt"],
+        "params": {
+            "duration": 5,
+            "resolution": "480p",
+            "aspectRatio": "16:9",
+            "generate_audio": generate_audio,
+        },
+    }
+
+
+@pytest.mark.parametrize("generate_audio", ["false", "true", 0, 1, [], {}])
+def test_key100_rejects_non_boolean_audio_toggle(generate_audio):
+    with pytest.raises(litellm.UnsupportedParamsError, match="generate_audio must be a boolean"):
+        GuangheVideoConfig().map_openai_params({"generate_audio": generate_audio}, FAST_KEY100_MODEL, False)
+
+
+def test_key100_omitted_audio_preserves_existing_gateway_defaults():
+    assert GuangheVideoConfig().map_openai_params({}, FAST_KEY100_MODEL, False) == {
+        "duration": 4,
+        "resolution": "720p",
+        "aspectRatio": "adaptive",
+    }
+
+
+@pytest.mark.parametrize(
+    "kind,field,limit", [("image", "imageUrls", 9), ("video", "videoUrls", 3), ("audio", "audioUrls", 3)]
+)
+def test_key100_reference_limits_preserve_input_order(kind, field, limit):
+    refs = [{"type": kind, "url": f"https://media.example/{kind}/{index}"} for index in range(limit + 1)]
+    config = GuangheVideoConfig()
+    mapped = config.map_openai_params({"references": refs[:limit]}, FAST_KEY100_MODEL, False)
+    assert mapped[field] == [ref["url"] for ref in refs[:limit]]
+    with pytest.raises(litellm.UnsupportedParamsError, match=f"at most {limit} {kind}"):
+        config.map_openai_params({"references": refs}, FAST_KEY100_MODEL, False)
+    # Adding the new channel must not tighten older models' existing contract.
+    legacy = config.map_openai_params({"references": refs}, "seedance2.0_企业折扣", False)
+    assert legacy[field] == [ref["url"] for ref in refs]
+
+
+def test_key100_first_last_frames_and_automatic_duration():
+    frames = [{**REF, "role": "first_frame"}, {**REF, "role": "last_frame", "url": "https://media.example/end.jpg"}]
+    mapped = GuangheVideoConfig().map_openai_params(
+        {"seconds": "-1", "resolution": "720p", "references": frames, "generate_audio": False},
+        FAST_KEY100_MODEL,
+        False,
+    )
+    assert mapped == {
+        "duration": -1,
+        "resolution": "720p",
+        "aspectRatio": "adaptive",
+        "generate_audio": False,
+        "firstFrameUrl": REF["url"],
+        "lastFrameUrl": frames[1]["url"],
+    }
+
+
+def test_legacy_audio_behavior_is_unchanged():
+    config = GuangheVideoConfig()
+    mapped = config.map_openai_params({"generate_audio": True}, "seedance2.0_企业折扣", False)
+    assert "generate_audio" not in mapped
+    with pytest.raises(litellm.UnsupportedParamsError, match="no documented mute control"):
+        config.map_openai_params({"generate_audio": False}, "seedance2.0_企业折扣", False)
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+async def test_retired_fast_cannot_create_even_when_called_directly(asynchronous, respx_mock):
+    args = dict(model="guanghe/" + RETIRED_FAST_MODEL, prompt="fly", api_key="test-key", api_base=BASE)
+    if asynchronous:
+        with pytest.raises(litellm.UnsupportedParamsError, match="retired for new generation"):
+            await litellm.avideo_generation(**args)
+    else:
+        with pytest.raises(litellm.UnsupportedParamsError, match="retired for new generation"):
+            litellm.video_generation(**args)
+    assert len(respx_mock.calls) == 0

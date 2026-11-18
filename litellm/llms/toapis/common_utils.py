@@ -143,6 +143,30 @@ def parse_toapis_task(raw_response: httpx.Response) -> ToAPISTaskResponse:
         ) from exc
 
 
+def parse_toapis_video_status_task(raw_response: httpx.Response) -> ToAPISTaskResponse:
+    """Normalize the /v1/videos/{id} envelope without relaxing other task APIs."""
+    if raw_response.status_code >= 400:
+        return parse_toapis_task(raw_response)
+    try:
+        raw_payload: object = cast(object, raw_response.json())
+        if not isinstance(raw_payload, Mapping) or raw_payload.get("object") != "video":
+            return parse_toapis_task(raw_response)
+        payload: Final = dict(cast(Mapping[str, object], raw_payload))
+        payload["object"] = "generation.task"
+        video_url: Final = payload.get("video_url")
+        if payload.get("result") is None and video_url is not None:
+            payload["result"] = {"type": "video", "data": [{"url": video_url}]}
+        if payload.get("status") == "completed":
+            payload.setdefault("progress", 100)
+        return ToAPISTaskResponse.model_validate(payload)
+    except ValueError as exc:
+        raise BaseLLMException(
+            status_code=502,
+            message=f"Invalid ToAPIs video status response: {exc}",
+            headers=raw_response.headers,
+        ) from exc
+
+
 def parse_toapis_video_create_task(raw_response: httpx.Response) -> ToAPISTaskResponse:
     """Parse a video-create response, including ToAPIs' accepted-task envelope."""
     if raw_response.status_code >= 400:

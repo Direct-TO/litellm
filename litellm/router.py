@@ -236,6 +236,7 @@ from litellm.types.utils import (
     shared_backend_model_info,
 )
 from litellm.types.utils import ModelInfo as ModelMapInfo
+from litellm.types.videos.constraints import VideoGenerationConstraints, VideoVariant
 from litellm.utils import (
     CustomStreamWrapper,
     EmbeddingResponse,
@@ -251,6 +252,7 @@ from litellm.utils import (
     is_region_allowed,
     set_live_deployment_replay,
 )
+from litellm.videos.constraints import deployment_video_variants, enforce_video_limits
 
 from .router_utils.pattern_match_deployments import PatternMatchRouter
 
@@ -309,6 +311,14 @@ def _cost_value_as_float(value: str | float | None) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _mapping_or_empty(value: object) -> Mapping[str, object]:
+    return cast(Mapping[str, object], value) if isinstance(value, Mapping) else {}
+
+
+def _deployment_metadata(deployment: Mapping[str, object]) -> Mapping[str, object]:
+    return _mapping_or_empty(deployment.get("model_info"))
 
 
 def model_info_is_active_for_environment(model_info: Mapping[str, object] | None) -> bool:
@@ -9702,13 +9712,12 @@ class Router:
         return None
 
     @staticmethod
-    def _deployment_usable_by_team(model: Mapping | Deployment, team_id: str | None) -> bool:
+    def _deployment_usable_by_team(model: Mapping[str, object] | Deployment, team_id: str | None) -> bool:
         """
         A team-scoped deployment (``model_info.team_id`` set) is only usable by
         callers from that same team; deployments without a team owner are shared.
         """
-        model_info: Final = model.get("model_info") if isinstance(model, dict) else model.model_info
-        owner_team_id: Final = model_info.get("team_id") if model_info is not None else None
+        owner_team_id: Final = model.model_info.team_id if isinstance(model, Deployment) else _deployment_metadata(model).get("team_id")
         return owner_team_id is None or owner_team_id == team_id
 
     def _get_model_group_deployment_usable_by_team(
@@ -9727,6 +9736,38 @@ class Router:
         if first_usable is None:
             return None
         return Deployment(**first_usable) if isinstance(first_usable, dict) else first_usable
+
+    def get_video_generation_constraints(
+        self, model_name: str, team_id: str | None = None, caller: object = None
+    ) -> VideoGenerationConstraints | None:
+        deployments = [
+            item for item in self.get_model_list(model_name=model_name, team_id=team_id) or []
+            if self._deployment_usable_by_team(item, team_id) and not _deployment_metadata(item).get("blocked")
+        ]
+        deployments = self._filter_deployments_by_model_access_groups(
+            model_name, deployments, {"metadata": {"user_api_key_auth": caller}}, team_id
+        )
+        variants: list[VideoVariant] = []
+        declared = False
+        for item in deployments:
+            info = _deployment_metadata(item)
+            endpoints = info.get("supported_endpoints")
+            if endpoints is not None and (not isinstance(endpoints, (list, tuple)) or "/v1/videos" not in endpoints):
+                continue
+            physical_model = cast(Mapping[str, object], item["litellm_params"]).get("model")
+            if not isinstance(physical_model, str):
+                continue
+            choices = deployment_video_variants(physical_model, info.get("video_generation_limits"))
+            if choices is None:
+                continue
+            declared = True
+            for choice in choices:
+                if choice not in variants:
+                    variants.append(choice)
+        if not declared:
+            return None
+        revision = hashlib.sha256(json.dumps(variants, sort_keys=True, separators=(",", ":")).encode()).hexdigest()[:16]
+        return {"version": 1, "revision": revision, "variants": variants}
 
     def get_configured_token_limits(self, model_name: str) -> "tuple[int | None, int | None]":
         """
@@ -11868,10 +11909,10 @@ class Router:
     def _filter_deployments_by_model_access_groups(
         self,
         model: str,
-        healthy_deployments: list,
-        request_kwargs: dict | None,
+        healthy_deployments: list[DeploymentTypedDict],
+        request_kwargs: Mapping[str, object] | None,
         request_team_id: str | None,
-    ) -> list:
+    ) -> list[DeploymentTypedDict]:
         """
         Restrict candidate deployments to caller-authorized model access groups.
 
@@ -11883,9 +11924,9 @@ class Router:
         if not healthy_deployments or request_kwargs is None:
             return healthy_deployments
 
-        metadata: Final = request_kwargs.get("metadata") or {}
-        litellm_metadata: Final = request_kwargs.get("litellm_metadata") or {}
-        user_api_key_auth: Final = metadata.get("user_api_key_auth") or litellm_metadata.get("user_api_key_auth")
+        metadata = _mapping_or_empty(request_kwargs.get("metadata"))
+        litellm_metadata = _mapping_or_empty(request_kwargs.get("litellm_metadata"))
+        user_api_key_auth = metadata.get("user_api_key_auth") or litellm_metadata.get("user_api_key_auth")
         if user_api_key_auth is None:
             return healthy_deployments
 
@@ -12141,10 +12182,9 @@ class Router:
         if not request_kwargs or request_kwargs.get(_ROUTER_CALL_TYPE_KWARG) not in ("video_generation", "avideo_generation"):
             return healthy_deployments
         extra_body = request_kwargs.get("extra_body")
-        if not any(request_kwargs.get(key) is not None for key in VIDEO_CONTRACT_FIELDS) and not (
+        canonical = any(request_kwargs.get(key) is not None for key in VIDEO_CONTRACT_FIELDS) or (
             isinstance(extra_body, dict) and "operation" in extra_body
-        ):
-            return healthy_deployments
+        )
         keys = VIDEO_NATIVE_OVERRIDE_FIELDS | {"extra_body", "tools", "generate_audio", "audio", "watermark", "seed"}
         specific = isinstance(healthy_deployments, dict)
         candidates = [healthy_deployments] if specific else healthy_deployments
@@ -12152,6 +12192,10 @@ class Router:
         errors: list[str] = []
         for deployment in candidates:
             try:
+                limits = _deployment_metadata(deployment).get("video_generation_limits")
+                if not canonical and limits is None and request_kwargs.get("seconds") is None:
+                    accepted.append(deployment)
+                    continue
                 merged = {**deployment["litellm_params"], **request_kwargs}
                 params = {key: value for key, value in merged.items() if key in keys and value is not None}
                 # Match SDK filtering of internal logging metadata. Keep extra_body
@@ -12160,6 +12204,20 @@ class Router:
                 physical_model = deployment["litellm_params"].get("model")
                 if not isinstance(physical_model, str):
                     raise ValueError("Video deployment must declare a provider model")
+                if limits is not None:
+                    native_overrides = VIDEO_NATIVE_OVERRIDE_FIELDS - VIDEO_CONTRACT_FIELDS - {"seconds"}
+                    if any(key in params for key in native_overrides | {"metadata", "parameters"}) or (
+                        isinstance(extra_body, dict) and any(k in extra_body for k in VIDEO_NATIVE_OVERRIDE_FIELDS)
+                    ):
+                        raise ValueError("Use canonical video parameters with deployment generation limits")
+                variants = deployment_video_variants(physical_model, limits)
+                if variants is None and limits is not None:
+                    raise ValueError("Video parameter limits require a known provider contract")
+                if not canonical and limits is None:
+                    if variants is not None:
+                        enforce_video_limits(variants, cast(Mapping[str, object], params))
+                    accepted.append(deployment)
+                    continue
                 provider_model, provider, _, _ = get_llm_provider(model=physical_model)
                 intent = get_video_intent_metadata(request_kwargs)
                 if intent and intent.get("required_provider") == "toapis" and (
@@ -12174,6 +12232,8 @@ class Router:
                     video_generation_provider_config=config,
                     video_generation_optional_params=cast(VideoCreateOptionalRequestParams, params),
                 )
+                if variants is not None:
+                    enforce_video_limits(variants, cast(Mapping[str, object], params))
                 accepted.append(deployment)
             except (litellm.BadRequestError, litellm.UnsupportedParamsError, TypeError, ValueError) as exc:
                 errors.append(str(exc))

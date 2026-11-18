@@ -203,6 +203,16 @@ model_list:
       model: deepseek/deepseek-chat
       api_key: os.environ/DEEPSEEK_API_KEY
 
+  # ---------- ToAPIs text ----------
+  - model_name: gpt-6.1-terra
+    litellm_params:
+      model: toapis/gpt-6.1-terra
+      api_key: os.environ/TOAPIS_API_KEY
+    model_info:
+      mode: chat
+      supported_endpoints:
+        - /v1/chat/completions
+
   # ---------- Media models ----------
   # Public model_name identifies the model. Provider names stay internal.
   # Same model_name may have multiple provider deployments for one public semantic model.
@@ -347,6 +357,18 @@ model_list:
       supported_endpoints:
         - /v1/videos
       allowed_fails_policy: *media_allowed_fails_policy
+  - model_name: gemini-omni-1.2-flash-preview
+    litellm_params:
+      model: toapis/gemini-omni-1.2-flash-preview
+      api_key: os.environ/TOAPIS_API_KEY
+      num_retries: 0
+    model_info:
+      mode: video_generation
+      allowed_fails: 2
+      cooldown_time: 60
+      supported_endpoints:
+        - /v1/videos
+      allowed_fails_policy: *media_allowed_fails_policy
   - model_name: veo3.1-fast
     litellm_params:
       model: toapis/veo3.1-fast
@@ -463,7 +485,7 @@ model_list:
       allowed_fails_policy: *media_allowed_fails_policy
   - model_name: seedance-2-fast
     litellm_params:
-      model: guanghe/seedance2.0-fast（企业折扣）
+      model: guanghe/seedance2.0-fast（国内key100）
       api_key: os.environ/GUANGHE_API_KEY
       order: 1
       num_retries: 0
@@ -485,6 +507,20 @@ model_list:
       supported_endpoints:
         - /v1/videos
       allowed_fails_policy: *media_allowed_fails_policy
+  # Retain the old model identity for existing task reads, never for new videos.
+  - model_name: seedance-2-fast
+    litellm_params:
+      model: guanghe/seedance2.0-fast（企业折扣）
+      api_key: os.environ/GUANGHE_API_KEY
+      order: 99
+      num_retries: 0
+    model_info:
+      allowed_fails: 2
+      cooldown_time: 60
+      allowed_fails_policy: *media_allowed_fails_policy
+      mode: video_generation
+      supported_endpoints: []
+      disable_background_health_check: true
   - model_name: seedance-2-mini
     litellm_params:
       model: guanghe/seedance2.0-mini（企业折扣）

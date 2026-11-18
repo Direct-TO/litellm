@@ -4,10 +4,12 @@ from collections.abc import Mapping
 from typing import Final
 
 from litellm.exceptions import UnsupportedParamsError
+from litellm.types.videos.constraints import VideoVariant, video_variant
 from litellm.videos.contract import VideoReference, validate_video_contract
 
 _RESOLUTIONS: Final = {
     "gemini-omni-flash": ("720p", "1080p"),
+    "gemini-omni-1.2-flash-preview": ("720p",),
     "gemini-omni-flash-preview-official": ("720p",),
     "grok-video-1.0": ("480p", "720p"),
     "grok-video-1.5": ("480p", "720p"),
@@ -28,10 +30,13 @@ _RESOLUTIONS: Final = {
     "Veo3.1-quality-official": ("720p", "1080p", "4K"),
 }
 GATEWAY_VIDEO_MODELS: Final = frozenset(_RESOLUTIONS)
-_GEMINI_MODELS: Final = frozenset({"gemini-omni-flash", "gemini-omni-flash-preview-official"})
+_GEMINI_MODELS: Final = frozenset(
+    {"gemini-omni-flash", "gemini-omni-1.2-flash-preview", "gemini-omni-flash-preview-official"}
+)
 _GROK_MODELS: Final = frozenset({"grok-video-1.0", "grok-video-1.5"})
 _DURATIONS: Final = {
     "gemini-omni-flash": (4, 6, 10),
+    "gemini-omni-1.2-flash-preview": tuple(range(4, 16)),
     "gemini-omni-flash-preview-official": tuple(range(1, 11)),
     "grok-video-1.0": tuple(range(1, 16)),
     "grok-video-1.5": tuple(range(1, 16)),
@@ -48,6 +53,8 @@ _NATIVE_INPUTS: Final = frozenset(
         "image",
         "images",
         "image_urls",
+        "first_image_url",
+        "last_image_url",
         "image_with_roles",
         "reference_images",
         "video_with_roles",
@@ -61,6 +68,43 @@ _NATIVE_INPUTS: Final = frozenset(
         "duration",
     }
 )
+
+
+def _ratios(model: str) -> tuple[str, ...]:
+    if model in _GEMINI_MODELS:
+        return ("16:9", "9:16")
+    if model in _GROK_MODELS:
+        return ("16:9", "9:16", "1:1", "3:2", "2:3")
+    common = ("16:9", "9:16", "1:1", "4:3", "3:4")
+    if model in {"seedance-2", "seedance-2-fast", "seedance-2-mini", "seedance-2-5", "MiniMax-H3"}:
+        return (*common, "21:9")
+    return common if model in {"wan3.0-video", "happyhorse-1.1"} else ()
+
+
+def generation_variants(model: str) -> list[VideoVariant] | None:
+    ratios = _ratios(model)
+    if not ratios or model not in _DURATIONS:
+        return None
+    base = video_variant(ratios, _RESOLUTIONS[model], _DURATIONS[model])
+    if model == "gemini-omni-flash":
+        base["resolution"].remove("1080p")
+        landscape = video_variant(("16:9",), ("1080p",), _DURATIONS[model])
+        landscape["resolution"] = ["1080p"]
+        base["frames"] = landscape["frames"] = False
+        return [base, landscape]
+    if model == "gemini-omni-flash-preview-official":
+        base["frames"] = False
+    if model == "happyhorse-1.1":
+        base["frames"] = False
+        first_frame = video_variant((), _RESOLUTIONS[model], _DURATIONS[model])
+        first_frame["frames"] = True
+        return [base, first_frame]
+    if model == "seedance-2-5":
+        base["frames"] = False
+        frames = video_variant((), _RESOLUTIONS[model], (-1,))
+        frames["frames"] = True
+        return [base, frames]
+    return [base]
 
 
 def _reject(model: str, message: str) -> None:
@@ -107,17 +151,9 @@ def map_gateway_video(model: str, params: Mapping[str, object], size_field: str)
         result["duration"] = duration
     ratio = params.get("aspect_ratio")
     if ratio is not None:
-        known_ratios = {"16:9", "9:16", "1:1", "4:3", "3:4"}
-        if model in {"seedance-2", "seedance-2-fast", "seedance-2-mini", "seedance-2-5", "MiniMax-H3"}:
-            known_ratios.add("21:9")
-            if ratio not in known_ratios:
-                _reject(model, f"aspect_ratio={ratio!r} is not supported")
-        elif model in {"wan3.0-video", "happyhorse-1.1"} and ratio not in known_ratios:
-            _reject(model, f"aspect_ratio={ratio!r} is not supported")
-        elif model in _GEMINI_MODELS and ratio not in {"16:9", "9:16"}:
-            _reject(model, "aspect_ratio must be 16:9 or 9:16")
-        elif model in _GROK_MODELS and ratio not in {"16:9", "9:16", "1:1", "3:2", "2:3"}:
-            _reject(model, "aspect_ratio must be 16:9, 9:16, 1:1, 3:2 or 2:3")
+        allowed_ratios = _ratios(model)
+        if allowed_ratios and ratio not in allowed_ratios:
+            _reject(model, f"aspect_ratio={ratio!r} is not supported; allowed={allowed_ratios}")
         result[size_field] = ratio
     resolution = params.get("resolution")
     if resolution is not None:
@@ -243,6 +279,20 @@ def _map_gemini_grok(
         _reject(model, "audio references are not supported")
     if references and params.get("tools"):
         _reject(model, "tools cannot be combined with media references")
+    if model == "gemini-omni-1.2-flash-preview":
+        if videos:
+            _reject(model, "video references are not supported")
+        regular = [ref.url for ref in images if ref.role == "reference"]
+        if len(regular) > 5:
+            _reject(model, "at most 5 reference images are supported")
+        if regular:
+            result["image_urls"] = regular
+        for ref in images:
+            if ref.role == "first_frame":
+                result["first_image_url"] = ref.url
+            elif ref.role == "last_frame":
+                result["last_image_url"] = ref.url
+        return
     if model in _GEMINI_MODELS:
         if any(ref.role != "reference" for ref in images):
             _reject(model, "explicit first/last-frame control has no documented mapping; use ordinary reference images")

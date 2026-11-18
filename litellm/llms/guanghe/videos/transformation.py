@@ -20,17 +20,34 @@ from litellm.llms.base_llm.videos.transformation import normalize_video_task_res
 from litellm.llms.openai.videos.transformation import OpenAIVideoConfig
 from litellm.secret_managers.main import get_secret_str
 from litellm.types.router import GenericLiteLLMParams
+from litellm.types.videos.constraints import VideoVariant, video_variant
 from litellm.types.videos.main import VideoCreateOptionalRequestParams, VideoObject
 from litellm.types.videos.utils import encode_video_id_with_provider, extract_original_video_id
 from litellm.videos.contract import validate_video_contract
 
 DEFAULT_API_BASE: Final = "https://newapi.aitoken.name/api/inspiration-waterfall/v1"
+FAST_KEY100_MODEL: Final = "seedance2.0-fast（国内key100）"
+RETIRED_FAST_MODEL: Final = "seedance2.0-fast（企业折扣）"
 MODEL_RESOLUTIONS: Final = {
     "seedance2.0_企业折扣": ("480p", "720p", "1080p"),
     "seedance2.5_企业折": ("480p", "720p", "1080p"),
-    "seedance2.0-fast（企业折扣）": ("480p", "720p"),
+    RETIRED_FAST_MODEL: ("480p", "720p"),
+    FAST_KEY100_MODEL: ("480p", "720p"),
     "seedance2.0-mini（企业折扣）": ("480p", "720p"),
 }
+_RATIOS: Final = ("16:9", "9:16", "1:1", "4:3", "3:4", "21:9")
+
+
+def _maximum_seconds(model: str) -> int:
+    return 30 if model == "seedance2.5_企业折" else 15
+
+
+def generation_variants(model: str) -> list[VideoVariant] | None:
+    if model not in MODEL_RESOLUTIONS or model == RETIRED_FAST_MODEL:
+        return None
+    return [video_variant(_RATIOS, MODEL_RESOLUTIONS[model], (-1, *range(4, _maximum_seconds(model) + 1)))]
+
+
 _STATUS_MAP: Final = {
     "accepting": "queued",
     "unknown": "queued",
@@ -146,29 +163,41 @@ class GuangheVideoConfig(OpenAIVideoConfig):
 
         if model not in MODEL_RESOLUTIONS:
             reject("no documented video contract for this model")
+        if model == RETIRED_FAST_MODEL:
+            reject(f"this model is retired for new generation; use {FAST_KEY100_MODEL}")
         unsupported = set(params) - set(self.get_supported_openai_params(model))
         if unsupported:
             reject(f"unsupported parameters: {', '.join(sorted(unsupported))}")
-        # These four channels generate audio by default (verified in the live outputs).
-        # Their API exposes no audio toggle: enabled uses that default; never ignore a mute request.
-        if params.get("generate_audio") is not None and params.get("generate_audio") is not True:
+        audio = params.get("generate_audio")
+        supports_audio_toggle = model == FAST_KEY100_MODEL
+        if supports_audio_toggle and audio is not None and not isinstance(audio, bool):
+            reject("generate_audio must be a boolean")
+        # Legacy channels generate audio by default but expose no mute control.
+        if not supports_audio_toggle and audio is not None and audio is not True:
             reject("this channel has no documented mute control; generate_audio must be true or omitted")
         references = validate_video_contract(params)
         duration = str(params.get("seconds") if params.get("seconds") is not None else 4)
-        maximum = 30 if model == "seedance2.5_企业折" else 15
+        maximum = _maximum_seconds(model)
         if not re.fullmatch(r"-1|[1-9]\d*", duration) or int(duration) not in (-1, *range(4, maximum + 1)):
             reject(f"seconds must be -1 or an integer between 4 and {maximum}")
         resolution = params.get("resolution") or "720p"
         if resolution not in MODEL_RESOLUTIONS[model]:
             reject(f"resolution must be one of {MODEL_RESOLUTIONS[model]}")
         ratio = params.get("aspect_ratio") or "adaptive"
-        if ratio not in ("16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "adaptive"):
+        if ratio != "adaptive" and ratio not in _RATIOS:
             reject("unsupported aspect_ratio")
         native: dict[str, object] = {"duration": int(duration), "resolution": resolution, "aspectRatio": ratio}
+        if supports_audio_toggle and audio is not None:
+            native["generate_audio"] = audio
         frames = [ref for ref in references if ref.role != "reference"]
         if frames and any(ref.role == "reference" for ref in references):
             reject("first/last frames cannot be mixed with ordinary references")
-        for kind, field, limit in (("image", "imageUrls", 30), ("video", "videoUrls", 10), ("audio", "audioUrls", 10)):
+        reference_limits = (
+            (("image", "imageUrls", 9), ("video", "videoUrls", 3), ("audio", "audioUrls", 3))
+            if model == FAST_KEY100_MODEL
+            else (("image", "imageUrls", 30), ("video", "videoUrls", 10), ("audio", "audioUrls", 10))
+        )
+        for kind, field, limit in reference_limits:
             selected = [ref.url for ref in references if ref.type == kind and ref.role == "reference"]
             if len(selected) > limit:
                 reject(f"at most {limit} {kind} references are supported")

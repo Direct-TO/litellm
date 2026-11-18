@@ -1,5 +1,12 @@
 # 网关视频输入与 ToAPIs 映射
 
+## 下游查询视频规格
+
+使用业务 Key 调用 `GET /v1/models?include_metadata=true`。已声明规格的视频模型在 `metadata.generation_constraints` 中返回格式版本 `version: 1`、随有效规格变化的 `revision` 和 `variants`。每个候选组合同时列出 `aspect_ratio`、`resolution`、`seconds` 三个允许值数组。选定的三个值须同属一个组合。数组内的 `null` 允许省略字段，`seconds` 中的 `-1` 允许显式请求智能时长。可选 `frames: true/false` 进一步区分含首尾帧和普通输入。资料缺失表示规格未声明，空组合列表表示当前配置下没有可选组合。素材、编辑与延长等操作仍按各自的协议校验。
+
+在已有的部署创建或更新接口中，可将 `{"max_seconds": 10, "aspect_ratios": ["16:9"]}` 保存至该部署的 `model_info.video_generation_limits`。支持的收窄字段为 `min_seconds`、`max_seconds`、`aspect_ratios` 和 `resolutions`。被收窄的维度须提交具体值，网关可据此执行上限。删除部署限制后恢复适配器的可选规格。目录聚合调用方有权使用且可创建视频的部署，不包含凭据或供应商地址。
+
+
 网关接受 `resolution`（480p、720p、1080p、2K、4K）、`aspect_ratio`（如 16:9）及有序 `references`（type、url、role）。智能参数省略，文件参考使用 HTTP(S) URL。该契约不与旧像素 `size`、本地 `input_reference` 或原生参考字段混用；非冲突的管理员 `extra_body` 扩展继续保留。
 
 统一 JSON 创建入口仍为 `POST /v1/videos`。新增可选顶层 `operation`：`generate`、`edit`、`extend`；不传或为 null 按 `generate` 处理。操作不能放进 `extra_body`，也不能用原生 `video_operation`、`action`、`duration` 覆盖统一契约。Router 预检与提交复用相同能力校验；不支持的操作在提交前拒绝，即使 `drop_params=true` 也不能降级为生成。
@@ -14,6 +21,7 @@ HappyHorse 和 Gemini Omni Official 已有的统一视频编辑映射也要求�
 | --- | --- | --- |
 | gemini-omni-flash | 720p、1080p（1080p 仅横屏） | 最多 3 张普通图 → image_urls；无视频/音频/显式首尾帧 |
 | gemini-omni-flash-preview-official | 720p | 最多 10 张普通图 → image_urls；operation=edit 时最多 3 条视频 → video_list；图片与视频互斥；编辑须省略比例 |
+| gemini-omni-1.2-flash-preview | 720p | 最多 5 张普通图 → image_urls；首帧/尾帧 → first_image_url/last_image_url；无视频/音频参考 |
 | grok-video-1.0 | 480p、720p | 普通图 → reference_images；首图 → image；合计最多 8 张；无尾帧/视频/音频 |
 | grok-video-1.5 | 480p、720p | 必须且仅有一张图片 → image（接受 reference 或 first_frame）；无尾帧/视频/音频 |
 | seedance-2 | 480p、720p、1080p、4K | image/video/audio_with_roles；首尾帧与普通参考互斥 |
@@ -29,9 +37,13 @@ HappyHorse 和 Gemini Omni Official 已有的统一视频编辑映射也要求�
 | zexapi/omni_flash-10s | 固定 720p、10 秒 | 16:9 / 9:16 → size=1280x720 / 720x1280；最多 7 张普通图或 7 条视频 → images；不自动切换到首尾帧型号 |
 | zexapi/omni_flash-10s-fl | 固定 720p、10 秒 | 显式首帧和可选尾帧 → images，按首/尾顺序排列；不接受普通参考图 |
 
-`seconds` 转为 ToAPIs 的 `duration`；新增校验：Gemini 普通版 4/6/10 秒、Official 1–10 秒、Grok 1–15 秒、Seedance 2/fast 4–15 秒或 -1、mini 4–15 秒、2.5 4–30 秒或 -1、Wan 2–30 秒、HappyHorse/Kling v3 3–15 秒。ZexAPI Omni 的 720p 和 10 秒由型号保证，校验后不发送 resolution/duration；省略 seconds 或 -1 表示采用型号固定时长。
+`seconds` 转为 ToAPIs 的 `duration`；新增校验：Gemini 旧普通版 4/6/10 秒、1.2 普通版 4–15 秒、Official 1–10 秒、Grok 1–15 秒、Seedance 2/fast 4–15 秒或 -1、mini 4–15 秒、2.5 4–30 秒或 -1、Wan 2–30 秒、HappyHorse/Kling v3 3–15 秒。ZexAPI Omni 的 720p 和 10 秒由型号保证，校验后不发送 resolution/duration；省略 seconds 或 -1 表示采用型号固定时长。
 
-Grok 支持 16:9、9:16、1:1、3:2、2:3；Gemini 和 ZexAPI Omni 支持 16:9、9:16。Gemini Official 视频编辑无法兑现指定宽高比，因此显式指定比例时返回清晰错误，不静默忽略。Gemini 两个型号的文档没有显式首尾帧字段，保留对此类角色的拒绝。
+Grok 支持 16:9、9:16、1:1、3:2、2:3；Gemini 和 ZexAPI Omni 支持 16:9、9:16。Gemini Official 视频编辑无法兑现指定宽高比，因此显式指定比例时返回清晰错误，不静默忽略。Gemini 旧普通版和 Official 的文档没有显式首尾帧字段，保留对此类角色的拒绝。
+
+Gemini Omni 1.2 普通版使用供应商 `POST /v1/videos` 创建、`GET /v1/videos/{id}` 查询，网关对外路径不变；任务 ID 保留模型信息以便后续轮询使用正确的供应商路径。该路由文档没有音频开关：省略 `generate_audio` 或传 `true` 使用路由默认行为，不向供应商透传未定义字段；`false` 明确拒绝，避免把静音要求默默丢弃。实际音轨以生成结果为准。
+
+2026-11-17 实测该新查询路径返回 `object: video`，完成结果使用顶层 `video_url`，不同于文档示例中的 `generation.task/result`。专用状态解析器兼容两种响应并保留 `billing`、`usage`；一次 720p、4 秒请求已通过实际创建、轮询完成和输出 URL 回读，供应商确认费用为 $0.20。此记录不代表持续可用率或全部参考素材组合已经实测。
 
 未确认契约的模型、供应商或档位明确拒绝新的扩展字段；旧原生请求形态仍沿用既有适配。
 
@@ -53,6 +65,7 @@ Grok 支持 16:9、9:16、1:1、3:2、2:3；Gemini 和 ZexAPI Omni 支持 16:9�
 
 - [Gemini Omni](https://docs.toapis.com/docs/cn/api-reference/videos/gemini-omni-flash/generation)
 - [Gemini Omni Official](https://docs.toapis.com/docs/cn/api-reference/videos/gemini-omni-flash-preview-official/generation)
+- [Gemini Omni 1.2 普通版](https://docs.toapis.com/docs/zh/api-reference/videos/gemini-omni-flash/generation-1-2)
 - [Grok 1.0](https://docs.toapis.com/docs/cn/api-reference/videos/grok-video/generation)
 - [Grok 1.5](https://docs.toapis.com/docs/cn/api-reference/videos/grok-video-1.5/generation)
 - [ZexAPI Omni](https://6l0ket291i.apifox.cn/462450037e0)

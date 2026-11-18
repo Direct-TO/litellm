@@ -16,6 +16,7 @@ pytestmark = pytest.mark.usefixtures("local_model_cost_map")
 _TOAPIS_VIDEO_MODELS = {
     "gemini-omni-flash",
     "gemini-omni-flash-preview-official",
+    "gemini-omni-1.2-flash-preview",
     "veo3.1-fast",
     "veo3.1-quality",
     "veo3.1-lite",
@@ -74,6 +75,7 @@ _EXPECTED_MEDIA_DEPLOYMENTS = {
     "guanghe/seedance2.0_企业折扣",
     "guanghe/seedance2.5_企业折",
     "guanghe/seedance2.0-fast（企业折扣）",
+    "guanghe/seedance2.0-fast（国内key100）",
     "guanghe/seedance2.0-mini（企业折扣）",
     *(f"toapis/{model}" for model in _TOAPIS_VIDEO_MODELS),
     *(f"zexapi/{model}" for model in _ZEXAPI_VEO_MODELS),
@@ -96,6 +98,7 @@ def test_media_catalogs_match_and_cover_every_configured_deployment():
         item["litellm_params"]["model"]
         for item in _dev_config()["model_list"]
         if item["litellm_params"]["model"].startswith(("toapis/", "zexapi/", "guanghe/"))
+        and item.get("model_info", {}).get("mode") != "chat"
     }
 
     assert main_catalog == backup_catalog
@@ -141,6 +144,7 @@ def test_media_service_defaults_and_failure_cooldown_policy():
         item
         for item in config["model_list"]
         if item["litellm_params"]["model"].startswith(("toapis/", "zexapi/", "guanghe/"))
+        and item.get("model_info", {}).get("mode") != "chat"
     ]
 
     assert general_settings.completion_model is None
@@ -156,7 +160,7 @@ def test_media_service_defaults_and_failure_cooldown_policy():
     assert failover_policy.status_codes == [403, 429, 503]
     assert failover_policy.submission_outcomes == ["rejected"]
     assert failover_policy.failure_scope == "provider"
-    assert len(media_deployments) == 55
+    assert len(media_deployments) == 57
     for deployment in media_deployments:
         assert deployment["litellm_params"]["num_retries"] == 0
         assert deployment["model_info"]["allowed_fails"] == 2
@@ -228,6 +232,7 @@ def test_all_public_media_models_have_generation_capabilities(monkeypatch):
         item
         for item in config["model_list"]
         if item["litellm_params"]["model"].startswith(("toapis/", "zexapi/", "guanghe/"))
+        and item.get("model_info", {}).get("mode") != "chat"
     ]
     router = Router(model_list=media_models)
     public_names = {item["model_name"] for item in media_models}

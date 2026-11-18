@@ -35,14 +35,15 @@ def isolate_transport(monkeypatch, respx_mock):
 
 def gateway(group, paused_primary=False):
     models = copy.deepcopy([row for row in CONFIG["model_list"] if row["model_name"] == group])
-    assert len(models) == 2
+    assert len(models) == (3 if group == "seedance-2-fast" else 2)
     for row in models:
         provider = row["litellm_params"]["model"].split("/", 1)[0]
         row["litellm_params"].update(
             {"api_key": provider + "-key", "api_base": GUANGHE if provider == "guanghe" else TOAPIS}
         )
-        row["model_info"]["id"] = group + "-" + provider
-        if provider == "guanghe" and paused_primary:
+        legacy_read_only = row["model_info"].get("supported_endpoints") == []
+        row["model_info"]["id"] = group + "-" + provider + ("-legacy" if legacy_read_only else "")
+        if provider == "guanghe" and paused_primary and not legacy_read_only:
             row["model_info"]["blocked"] = True
     # Config file position must not override the explicit order.
     return Router(model_list=list(reversed(models)), num_retries=0, **CONFIG["router_settings"])
@@ -72,12 +73,26 @@ def provider_routes(respx_mock, primary_status=202, primary_body=None):
 
 @pytest.mark.parametrize("group", GROUPS)
 def test_config_has_two_ordered_providers_per_seedance_group(group):
-    rows = [row for row in CONFIG["model_list"] if row["model_name"] == group]
+    rows = [
+        row
+        for row in CONFIG["model_list"]
+        if row["model_name"] == group and row["model_info"].get("supported_endpoints") != []
+    ]
     assert [(row["litellm_params"]["model"].split("/", 1)[0], row["litellm_params"]["order"]) for row in rows] == [
         ("guanghe", 1),
         ("toapis", 2),
     ]
     assert not any(row["model_name"].startswith("guanghe-seedance-") for row in CONFIG["model_list"])
+
+
+def test_fast_config_keeps_legacy_reads_separate_from_new_creates():
+    rows = [row for row in CONFIG["model_list"] if row["model_name"] == "seedance-2-fast"]
+    primary = next(row for row in rows if row["litellm_params"].get("order") == 1)
+    assert primary["litellm_params"]["model"] == "guanghe/seedance2.0-fast（国内key100）"
+    legacy = next(row for row in rows if row["model_info"].get("supported_endpoints") == [])
+    assert legacy["litellm_params"]["model"] == "guanghe/seedance2.0-fast（企业折扣）"
+    assert legacy["model_info"]["disable_background_health_check"] is True
+    assert legacy["model_info"].get("blocked", False) is False
 
 
 @pytest.mark.parametrize("group", GROUPS)
@@ -96,17 +111,27 @@ async def test_platform_default_audio_request_still_prefers_guanghe(group, respx
     assert decode_video_id_with_provider(result.id)["custom_llm_provider"] == "guanghe"
     assert primary.call_count == 1
     assert backup.call_count == 0
-    assert "generate_audio" not in json.loads(primary.calls[0].request.content)["params"]
+    native = json.loads(primary.calls[0].request.content)["params"]
+    if group == "seedance-2-fast":
+        assert native["generate_audio"] is True
+    else:
+        assert "generate_audio" not in native
 
 
 @pytest.mark.parametrize("group", GROUPS)
 async def test_explicit_mute_selects_provider_that_supports_it(group, respx_mock):
     primary, backup = provider_routes(respx_mock)
     result = await gateway(group).avideo_generation(**request(group, generate_audio=False))
-    assert decode_video_id_with_provider(result.id)["custom_llm_provider"] == "toapis"
-    assert primary.call_count == 0
-    assert backup.call_count == 1
-    assert json.loads(backup.calls[0].request.content)["generate_audio"] is False
+    if group == "seedance-2-fast":
+        assert decode_video_id_with_provider(result.id)["custom_llm_provider"] == "guanghe"
+        assert primary.call_count == 1
+        assert backup.call_count == 0
+        assert json.loads(primary.calls[0].request.content)["params"]["generate_audio"] is False
+    else:
+        assert decode_video_id_with_provider(result.id)["custom_llm_provider"] == "toapis"
+        assert primary.call_count == 0
+        assert backup.call_count == 1
+        assert json.loads(backup.calls[0].request.content)["generate_audio"] is False
 
 
 @pytest.mark.parametrize("group", GROUPS)

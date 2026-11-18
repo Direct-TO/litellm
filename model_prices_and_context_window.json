@@ -39254,6 +39254,23 @@
             "video"
         ]
     },
+    "guanghe/seedance2.0-fast（国内key100）": {
+        "litellm_provider": "guanghe",
+        "mode": "video_generation",
+        "source": "https://gc.aitoken.name/#/api-docs",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image",
+            "video",
+            "audio"
+        ],
+        "supported_output_modalities": [
+            "video"
+        ]
+    },
     "guanghe/seedance2.0-mini（企业折扣）": {
         "litellm_provider": "guanghe",
         "mode": "video_generation",
@@ -39410,6 +39427,36 @@
         ],
         "supported_output_modalities": [
             "image"
+        ]
+    },
+    "toapis/gpt-6.1-terra": {
+        "litellm_provider": "toapis",
+        "mode": "chat",
+        "supports_function_calling": false,
+        "source": "https://docs.toapis.com/docs/zh/api-reference/models",
+        "supported_endpoints": [
+            "/v1/chat/completions"
+        ],
+        "supported_modalities": [
+            "text"
+        ],
+        "supported_output_modalities": [
+            "text"
+        ]
+    },
+    "toapis/gemini-omni-1.2-flash-preview": {
+        "litellm_provider": "toapis",
+        "mode": "video_generation",
+        "source": "https://docs.toapis.com/docs/zh/api-reference/videos/gemini-omni-flash/generation-1-2",
+        "supported_endpoints": [
+            "/v1/videos"
+        ],
+        "supported_modalities": [
+            "text",
+            "image"
+        ],
+        "supported_output_modalities": [
+            "video"
         ]
     },
     "toapis/gemini-omni-flash": {

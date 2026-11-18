@@ -9,10 +9,12 @@ import litellm
 from litellm.llms.base_llm.chat.transformation import BaseLLMException
 from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler
 from litellm.llms.toapis.videos.transformation import ToAPISVideoConfig
+from litellm.router import Router
 from litellm.types.router import GenericLiteLLMParams
 from litellm.types.videos.utils import decode_video_id_with_provider
 
 _SEEDANCE_PRIVATE_REVIEW_MODELS = ["seedance-2", "seedance-2-fast", "seedance-2-mini", "seedance-2-5"]
+_OMNI_1_2_MODEL = "gemini-omni-1.2-flash-preview"
 
 
 @pytest.mark.parametrize("billing", [None, {"status": "pending"}, {"status": "settled", "credits": "87.3", "cost_usd": "0.4365"}, {"status": "refunded", "credits": "0", "cost_usd": "0"}])
@@ -62,6 +64,255 @@ def _create_request_data(model, params):
         litellm_params=GenericLiteLLMParams(),
         headers={},
     )[0]
+
+
+@pytest.mark.parametrize("api_base", ["https://toapis.cn", "https://toapis.cn/v1", "https://toapis.cn/v1/videos"])
+def test_omni_1_2_uses_documented_create_endpoint(api_base):
+    assert ToAPISVideoConfig().get_complete_url(_OMNI_1_2_MODEL, api_base, {}) == "https://toapis.cn/v1/videos"
+
+
+@pytest.mark.parametrize(
+    "params,expected",
+    [
+        ({}, {}),
+        (
+            {"seconds": "4", "resolution": "720p", "aspect_ratio": "9:16", "generate_audio": True},
+            {"duration": 4, "resolution": "720p", "aspect_ratio": "9:16"},
+        ),
+        (
+            {
+                "seconds": "15",
+                "references": [{"type": "image", "url": f"https://files.example/{i}.png"} for i in range(5)],
+            },
+            {"duration": 15, "image_urls": [f"https://files.example/{i}.png" for i in range(5)]},
+        ),
+        (
+            {
+                "seconds": "6",
+                "references": [
+                    {"type": "image", "url": "https://files.example/last.png", "role": "last_frame"},
+                    {"type": "image", "url": "https://files.example/first.png", "role": "first_frame"},
+                ],
+            },
+            {
+                "duration": 6,
+                "first_image_url": "https://files.example/first.png",
+                "last_image_url": "https://files.example/last.png",
+            },
+        ),
+        (
+            {
+                "extra_body": {
+                    "duration": 8,
+                    "image_urls": ["https://files.example/style.png"],
+                    "first_image_url": "https://files.example/first.png",
+                    "last_image_url": "https://files.example/last.png",
+                    "generate_audio": True,
+                }
+            },
+            {
+                "duration": 8,
+                "image_urls": ["https://files.example/style.png"],
+                "first_image_url": "https://files.example/first.png",
+                "last_image_url": "https://files.example/last.png",
+            },
+        ),
+    ],
+)
+def test_omni_1_2_submits_documented_payload(respx_mock, params, expected):
+    route = respx_mock.post("https://toapis.com/v1/videos").respond(
+        json={"id": "omni-task", "object": "generation.task", "model": _OMNI_1_2_MODEL, "status": "queued"}
+    )
+
+    result = litellm.video_generation(
+        model=f"toapis/{_OMNI_1_2_MODEL}", prompt="waves", api_key="test-key", **params
+    )
+
+    assert result.status == "queued"
+    assert route.call_count == 1
+    assert json.loads(route.calls[0].request.content) == {"model": _OMNI_1_2_MODEL, "prompt": "waves", **expected}
+
+
+@pytest.mark.parametrize(
+    "params,message",
+    [
+        ({"seconds": "3", "resolution": "720p"}, "seconds"),
+        ({"seconds": "16"}, "duration"),
+        ({"resolution": "1080p"}, "resolution"),
+        ({"aspect_ratio": "1:1"}, "aspect_ratio"),
+        (
+            {"references": [{"type": "image", "url": f"https://files.example/{i}.png"} for i in range(6)]},
+            "at most 5",
+        ),
+        ({"references": [{"type": "video", "url": "https://files.example/input.mp4"}]}, "video references"),
+        ({"references": [{"type": "audio", "url": "https://files.example/input.mp3"}]}, "audio references"),
+        ({"extra_body": {"duration": 16}}, "duration"),
+        ({"extra_body": {"resolution": "480p"}}, "resolution"),
+        ({"extra_body": {"aspect_ratio": "1:1"}}, "aspect_ratio"),
+        ({"extra_body": {"image_urls": ["https://files.example/ref.png"] * 6}}, "at most 5"),
+        ({"extra_body": {"image_urls": ["data:image/png;base64,AAAA"]}}, "HTTP"),
+        ({"extra_body": {"first_image_url": "C:/local/image.png"}}, "HTTP"),
+        ({"extra_body": {"video_url": "https://files.example/input.mp4"}}, "video inputs"),
+        ({"extra_body": {"video_list": [{"video_url": "https://files.example/input.mp4"}]}}, "video inputs"),
+        ({"extra_body": {"generate_audio": False}}, "no documented mute control"),
+        ({"extra_body": {"generate_audio": "true"}}, "only accepts true"),
+    ],
+)
+def test_omni_1_2_invalid_inputs_are_rejected_before_submission(respx_mock, params, message):
+    with pytest.raises(litellm.UnsupportedParamsError, match=message):
+        litellm.video_generation(model=f"toapis/{_OMNI_1_2_MODEL}", prompt="waves", api_key="test-key", **params)
+
+    assert not respx_mock.calls
+
+
+@pytest.mark.parametrize("field", ["first_image_url", "last_image_url"])
+def test_omni_1_2_native_frames_cannot_override_canonical_references(respx_mock, field):
+    with pytest.raises(litellm.UnsupportedParamsError, match="override"):
+        litellm.video_generation(
+            model=f"toapis/{_OMNI_1_2_MODEL}",
+            prompt="waves",
+            api_key="test-key",
+            references=[{"type": "image", "url": "https://files.example/original.png", "role": "first_frame"}],
+            extra_body={field: "https://files.example/override.png"},
+        )
+
+    assert not respx_mock.calls
+
+
+@pytest.mark.parametrize("include_status_model", [True, False])
+@pytest.mark.parametrize("status_envelope", ["generation.task", "video"])
+@pytest.mark.parametrize("api_base", ["https://toapis.com", "https://toapis.com/v1", "https://toapis.com/v1/videos"])
+def test_omni_1_2_uploads_local_reference_and_retrieves_task_on_documented_endpoint(
+    respx_mock, include_status_model, status_envelope, api_base
+):
+    upload = respx_mock.post("https://toapis.com/v1/uploads/images").respond(
+        json={
+            "success": True,
+            "message": "uploaded",
+            "data": {"id": "img", "url": "https://files.example/reference.png", "mime_type": "image/png", "size": 8},
+        }
+    )
+    create = respx_mock.post("https://toapis.com/v1/videos").respond(
+        json={"id": "omni-task", "object": "generation.task", "model": _OMNI_1_2_MODEL, "status": "queued"}
+    )
+    retrieve = respx_mock.get("https://toapis.com/v1/videos/omni-task").mock(
+        side_effect=[
+            httpx.Response(
+                200,
+                json={
+                    "id": "omni-task",
+                    "object": status_envelope,
+                    "status": "in_progress",
+                    "progress": 99,
+                    "billing": {"status": "pending"},
+                    **({"model": _OMNI_1_2_MODEL} if include_status_model else {}),
+                },
+            ),
+            httpx.Response(
+                200,
+                json={
+                    "id": "omni-task",
+                    "object": status_envelope,
+                    "status": "completed",
+                    "completed_at": 1794880867,
+                    "billing": {"status": "settled", "credits": "40", "cost_usd": "0.2"},
+                    "usage": {"charge_type": "per_request", "requests": 1},
+                    **({"model": _OMNI_1_2_MODEL} if include_status_model else {}),
+                    **(
+                        {"video_url": "https://files.example/result.mp4"}
+                        if status_envelope == "video"
+                        else {"result": {"type": "video", "data": [{"url": "https://files.example/result.mp4"}]}}
+                    ),
+                },
+            ),
+        ]
+    )
+
+    created = litellm.video_generation(
+        model=f"toapis/{_OMNI_1_2_MODEL}",
+        prompt="waves",
+        api_key="test-key",
+        api_base=api_base,
+        seconds="4",
+        input_reference=b"\x89PNG\r\n\x1a\n",
+    )
+    pending = litellm.video_status(created.id, api_key="test-key", api_base=api_base)
+    completed = litellm.video_status(pending.id, api_key="test-key", api_base=api_base)
+
+    assert upload.call_count == create.call_count == 1
+    assert retrieve.call_count == 2
+    assert decode_video_id_with_provider(pending.id)["model_id"] == _OMNI_1_2_MODEL
+    assert pending.progress == 99
+    assert pending.provider_billing == {"status": "pending"}
+    assert completed.status == "completed"
+    assert completed.output_url == "https://files.example/result.mp4"
+    assert completed.completed_at == 1794880867
+    assert completed.provider_billing == {"status": "settled", "credits": "40", "cost_usd": "0.2"}
+    assert completed.provider_usage == {"charge_type": "per_request", "requests": 1}
+    assert json.loads(create.calls[0].request.content) == {
+        "model": _OMNI_1_2_MODEL,
+        "prompt": "waves",
+        "duration": 4,
+        "image_urls": ["https://files.example/reference.png"],
+    }
+
+
+@pytest.mark.asyncio
+async def test_omni_1_2_router_retrieves_live_video_envelope_with_deployment_credentials(respx_mock, monkeypatch):
+    monkeypatch.setattr(litellm, "disable_aiohttp_transport", True)
+    create = respx_mock.post("https://toapis-fixture.example/v1/videos").respond(
+        json={"id": "omni-task", "object": "video", "model": _OMNI_1_2_MODEL, "status": "in_progress"}
+    )
+    retrieve = respx_mock.get("https://toapis-fixture.example/v1/videos/omni-task").respond(
+        json={
+            "id": "omni-task",
+            "object": "video",
+            "status": "completed",
+            "video_url": "https://files.example/result.mp4",
+            "usage": {"requests": 1, "charge_type": "per_request"},
+            "billing": {"status": "settled", "cost_usd": "0.2"},
+        }
+    )
+    router = Router(
+        model_list=[
+            {
+                "model_name": "omni-public",
+                "litellm_params": {
+                    "model": f"toapis/{_OMNI_1_2_MODEL}",
+                    "api_base": "https://toapis-fixture.example/v1",
+                    "api_key": "deployment-fixture-key",
+                },
+            }
+        ],
+        num_retries=0,
+    )
+    created = await router.avideo_generation(model="omni-public", prompt="waves", seconds="4", resolution="720p")
+    resolved_model = router.resolve_model_name_from_model_id(decode_video_id_with_provider(created.id)["model_id"])
+    completed = await router.avideo_status(model=resolved_model, video_id=created.id)
+
+    assert resolved_model == "omni-public"
+    assert create.call_count == retrieve.call_count == 1
+    assert retrieve.calls[0].request.headers["Authorization"] == "Bearer deployment-fixture-key"
+    assert completed.status == "completed"
+    assert completed.progress == 100
+    assert completed.output_url == "https://files.example/result.mp4"
+    assert decode_video_id_with_provider(completed.id)["model_id"] == _OMNI_1_2_MODEL
+    assert completed.provider_billing == {"status": "settled", "cost_usd": "0.2"}
+
+
+def test_omni_1_2_completed_video_envelope_without_url_is_not_success():
+    result = ToAPISVideoConfig().transform_video_status_retrieve_response(
+        raw_response=httpx.Response(
+            200,
+            json={"id": "omni-task", "object": "video", "status": "completed"},
+            request=httpx.Request("GET", "https://toapis.com/v1/videos/omni-task"),
+        ),
+        logging_obj=Mock(),
+        custom_llm_provider="toapis",
+    )
+
+    assert result.status == "failed"
+    assert result.error["code"] == "provider_contract_error"
 
 
 @pytest.mark.parametrize("model", _SEEDANCE_PRIVATE_REVIEW_MODELS)
