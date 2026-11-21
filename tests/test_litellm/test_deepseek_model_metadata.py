@@ -12,13 +12,11 @@ field set to ``True``.
 import json
 import os
 
-
 import litellm
 from litellm.utils import (
     _supports_factory,
     supports_response_schema,
 )
-
 
 # ---------------------------------------------------------------------------
 # Data-level tests – verify the JSON files are in sync
@@ -36,8 +34,22 @@ def _load_backup_json() -> dict:
 
 
 class TestDeepSeekModelCostEntries:
-    """Verify that provider-prefixed DeepSeek entries contain the same
-    capability flags as their bare-name counterparts in the JSON files."""
+    """Verify DeepSeek capability flags and the registry distributed with LiteLLM."""
+
+    def test_flash_vision_and_limits_match_in_both_catalogs(self):
+        model = "deepseek/deepseek-flash"
+        backup = _load_backup_json()[model]
+        path = os.path.join(
+            os.path.dirname(os.path.dirname(litellm.__file__)),
+            "model_prices_and_context_window.json",
+        )
+        with open(path, encoding="utf-8") as f:
+            assert json.load(f)[model] == backup
+        assert backup["supports_vision"] is True
+        assert backup["supports_function_calling"] is True
+        assert backup["max_output_tokens"] == 393216
+        # The static USD catalog uses DeepSeek's published peak estimate.
+        assert backup["cache_read_input_token_cost"] == 0.006 / 1_000_000
 
     def test_deepseek_chat_supports_response_schema_in_backup(self):
         data = _load_backup_json()
@@ -105,23 +117,13 @@ class TestSupportsResponseSchemaDeepSeek:
         assert supports_response_schema(model="deepseek/deepseek-chat") is True
 
     def test_explicit_provider(self):
-        assert (
-            supports_response_schema(
-                model="deepseek-chat", custom_llm_provider="deepseek"
-            )
-            is True
-        )
+        assert supports_response_schema(model="deepseek-chat", custom_llm_provider="deepseek") is True
 
     def test_reasoner_provider_slash_model(self):
         assert supports_response_schema(model="deepseek/deepseek-reasoner") is True
 
     def test_reasoner_explicit_provider(self):
-        assert (
-            supports_response_schema(
-                model="deepseek-reasoner", custom_llm_provider="deepseek"
-            )
-            is True
-        )
+        assert supports_response_schema(model="deepseek-reasoner", custom_llm_provider="deepseek") is True
 
 
 # ---------------------------------------------------------------------------
